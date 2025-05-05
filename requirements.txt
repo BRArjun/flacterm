@@ -1,0 +1,4 @@
+textual==3.2.0
+rich==14.0.0
+requests==2.25.1
+python-vlc==3.0.21203
