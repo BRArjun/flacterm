@@ -2,15 +2,20 @@
 
 - implement like support / adding to liked music 
 - creating custom user playlists
+- fix problems with vlc errors while streaming
 - implement queue function
 - basic media controls like forward - backward - repeat - progres bar(partially implemented)
 
 -- Low Priority
 
--- write a good readme
+- write a good readme
 - lyrics support
 - implement album support from the api
 - improve UI
 - downloading support
 - make api requests faster or if there are too many results batch call the api
 - caching
+
+-- Future Plans
+
+- add ytm playlist import functionality
