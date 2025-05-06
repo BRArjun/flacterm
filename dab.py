@@ -175,95 +175,271 @@ def get_track_detail(track_id):
         print(f"[red]Failed to get track details[/red]: {e}")
     return None
 
-
 class LyricsDisplay(Widget):
     def compose(self):
-        """Compose method to define widget structure."""
         self.scroll = ScrollableContainer(id="lyrics_display")
-        self.lyrics_static = Static("Waiting for lyrics...", id="lyrics_text")
         yield self.scroll
 
     def on_mount(self):
-        """Setup initial state and properties when widget is mounted."""
-        self.styles.height = "80%"
-        self.lyrics_static.update("Waiting for lyrics...")
+        self.styles.height = 20  # Set height to show a portion of lyrics
         self.has_lyrics = False
-        self.lyrics_data = {}
-        self.lyrics_lines = []
-        self.current_line_index = 0
+        self.lyrics_lines = []        # List of (timestamp, text)
+        self.line_widgets = []        # List of Static widgets for display
+        self.current_line_index = -1
         self.lyric_task = None
-
-        # Mount the Static widget after the ScrollableContainer is mounted
-        self.scroll.mount(self.lyrics_static)
+        # Mount an initial placeholder
+        self.scroll.mount(Static("Waiting for lyrics...", id="lyrics_placeholder"))
+        # Import syncedlyrics here to avoid issues if the package is missing
+        try:
+            import syncedlyrics
+            self.syncedlyrics = syncedlyrics
+            self.syncedlyrics_available = True
+        except ImportError:
+            print("syncedlyrics package not found. Please install it with: pip install syncedlyrics")
+            self.syncedlyrics_available = False
 
     def stop_lyrics_loop(self):
-        """Stop the lyrics loop if it's running."""
+        """Stop the lyrics playback loop if running."""
         if self.lyric_task:
             self.lyric_task.cancel()
             self.lyric_task = None
 
     def parse_lyrics(self, raw_lyrics: str):
-        """Parse LRC format to a list of (time, text) tuples."""
+        """Parse LRC format to list of (timestamp, line) tuples."""
         self.lyrics_lines = []
         for line in raw_lyrics.splitlines():
-            # Match timestamp and lyrics in the LRC format
-            match = re.match(r"\[([0-9]+:[0-9]+\.[0-9]+)\](.*)", line)
+            match = re.match(r"\[([0-9]+):([0-9]+\.[0-9]+)\](.*)", line)
             if match:
-                time_str, text = match.groups()
-                minutes, seconds = map(float, time_str.split(":"))
-                timestamp = minutes * 60 + seconds
+                min_str, sec_str, text = match.groups()
+                timestamp = int(min_str) * 60 + float(sec_str)
                 self.lyrics_lines.append((timestamp, text.strip()))
-        self.lyrics_lines.sort()  # Sort by timestamp
+        
+        # Make sure we have something after parsing
+        if not self.lyrics_lines:
+            self.has_lyrics = False
+            print("No lyrics lines were parsed from the raw lyrics")
+        else:
+            self.lyrics_lines.sort()
+            self.has_lyrics = True
 
     def update_content(self):
-        """Update lyrics display content."""
-        if self.has_lyrics:
-            # Update the static widget with lyrics content
-            content = "\n".join([line for _, line in self.lyrics_lines])
+        """Clear old lyrics and add new ones as Static widgets."""
+        # First, clear the scroll container
+        self.scroll.remove_children()
+        self.line_widgets = []  # Clear the list of line widgets
+
+        if self.has_lyrics and self.lyrics_lines:
+            # Add each lyric line as a Static widget
+            for _, text in self.lyrics_lines:
+                widget = Static(text)
+                self.scroll.mount(widget)
+                self.line_widgets.append(widget)
+            
+            # Force a refresh
+            self.scroll.refresh()
         else:
-            content = "Lyrics not found."
-        self.lyrics_static.update(content)
+            # Display a message if no lyrics
+            self.scroll.mount(Static("Lyrics not found."))
+            self.scroll.refresh()
 
     def fetch_lyrics(self, artist, title):
-        """Fetch lyrics from the API using the provided function."""
+        """Fetch LRC-style synced lyrics using syncedlyrics library."""
         if not artist or not title:
             self.has_lyrics = False
-            self.lyrics_data = {}
             self.lyrics_lines = []
             self.update_content()
             return False
 
-        base_url = get_base_url()  # Using the existing function from your code
-        url = f"{base_url}/lyrics?artist={requests.utils.quote(artist)}&title={requests.utils.quote(title)}"
-        
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                data = response.json()
-                if data and "lyrics" in data and data["lyrics"]:
-                    self.lyrics_data = data
-                    self.parse_lyrics(data["lyrics"])
-                    self.has_lyrics = True
-                    self.current_line_index = 0
-                    self.update_content()
-                    return True
-                else:
-                    self.has_lyrics = False
-                    self.update_content()
-                    return False
-            else:
-                self.has_lyrics = False
-                self.update_content()
-                return False
-        except Exception as e:
-            print(f"Failed to fetch lyrics: {e}")
-            self.has_lyrics = False
-            self.update_content()
+        if not self.syncedlyrics_available:
+            self.scroll.remove_children()
+            self.scroll.mount(Static("syncedlyrics library not available. Please install it."))
+            self.scroll.refresh()
             return False
 
+        try:
+            # Show status while fetching
+            self.scroll.remove_children()
+            self.scroll.mount(Static(f"Fetching lyrics for '{title}' by '{artist}'..."))
+            self.scroll.refresh()
+            
+            # Create search term combining artist and title
+            search_term = f"{title} {artist}"
+            
+            # Try to get synced lyrics first
+            raw_lyrics = self.syncedlyrics.search(search_term, synced_only=True)
+            lyrics_type = "synced"
+            
+            # If no synced lyrics found, try plain lyrics as fallback
+            if not raw_lyrics:
+                print("No synced lyrics found, trying plain text")
+                raw_lyrics = self.syncedlyrics.search(search_term, plain_only=True)
+                lyrics_type = "plain text"
+            
+            if raw_lyrics:
+                self.parse_lyrics(raw_lyrics)
+                # Update content after we've parsed lyrics
+                self.update_content()
+                self.current_line_index = -1
+                # Show a quick notification about the lyrics type
+                print(f"Found {lyrics_type} lyrics with {len(self.lyrics_lines)} lines")
+                return True
+            else:
+                print(f"No lyrics found for {search_term}")
+                self.scroll.remove_children()
+                self.scroll.mount(Static(f"No lyrics found for '{title}' by '{artist}'"))
+                self.scroll.refresh()
+        except Exception as e:
+            print(f"Failed to fetch lyrics: {e}")
+            # Display the error in the UI
+            self.scroll.remove_children()
+            self.scroll.mount(Static(f"Error fetching lyrics: {str(e)}"))
+            self.scroll.refresh()
+
+        self.has_lyrics = False
+        self.update_content()
+        return False
+
+    async def start_lyrics_loop(self, current_position=0.0):
+        """Start scrolling through lyrics based on LRC timestamps.
+        
+        Args:
+            current_position: Current playback position in seconds
+        """
+        if not self.has_lyrics or not self.lyrics_lines:
+            print("Cannot start lyrics loop: no lyrics available")
+            return
+
+        self.stop_lyrics_loop()
+        self.lyric_task = asyncio.create_task(self._lyrics_loop(current_position))
+
+    async def _lyrics_loop(self, start_position=0.0):
+        """Loop that highlights lyrics in sync with timestamps.
+        
+        Args:
+            start_position: Start position in the song (in seconds)
+        """
+        start_time = time.monotonic()
+        total = len(self.lyrics_lines)
+        
+        print(f"Starting lyrics loop with {total} lines at position {start_position}s")
+        
+        # Find the correct starting line based on current playback position
+        starting_line = 0
+        for i, (timestamp, _) in enumerate(self.lyrics_lines):
+            if timestamp > start_position:
+                break
+            starting_line = i
+        
+        # If we're starting mid-song, immediately show the current line
+        if starting_line > 0:
+            self.current_line_index = starting_line
+            await self.highlight_line(starting_line)
+            
+        # Start from the next line that hasn't been played yet
+        for i in range(starting_line + 1, len(self.lyrics_lines)):
+            timestamp, _ = self.lyrics_lines[i]
+            
+            # Calculate the time until this lyric should appear
+            now = time.monotonic()
+            elapsed = now - start_time + start_position  # Adjust for starting position
+            target_time = timestamp
+            delay = max(0, target_time - elapsed)
+            
+            # Only wait if there's actually time to wait
+            if delay > 0:
+                await asyncio.sleep(delay)
+            
+            # Update the current line
+            self.current_line_index = i
+            await self.highlight_line(i)
+
+        self.lyric_task = None
+
+    async def highlight_line(self, index: int):
+        """Highlight the current line and scroll to it, adding an arrow to the current line."""
+        if not self.line_widgets or len(self.line_widgets) != len(self.lyrics_lines):
+            print("Line widgets and lyrics lines don't match!")
+            return
+        
+        # Calculate visible range to optimize updates (show past and upcoming lines)
+        visible_range = 5  # Number of lines to show before and after current
+        start_idx = max(0, index - visible_range)
+        end_idx = min(len(self.line_widgets) - 1, index + visible_range)
+            
+        # Update only the visible lines to improve performance
+        for i, widget in enumerate(self.line_widgets):
+            if start_idx <= i <= end_idx:
+                if i == index:
+                    # Current line with arrow
+                    widget.update(f"→ {self.lyrics_lines[i][1]}")
+                    widget.styles.color = "yellow"
+                    widget.styles.bold = True
+                elif i == index - 1:
+                    # Previous line (dimmed)
+                    widget.update(self.lyrics_lines[i][1])
+                    widget.styles.color = "gray"
+                    widget.styles.bold = False
+                elif i == index + 1:
+                    # Next line (slightly highlighted)
+                    widget.update(self.lyrics_lines[i][1])
+                    widget.styles.color = "white"
+                    widget.styles.bold = False
+                else:
+                    # Regular line
+                    widget.update(self.lyrics_lines[i][1])
+                    widget.styles.color = None
+                    widget.styles.bold = False
+        
+        # Make sure we refresh the display
+        self.refresh()
+        
+        # Center the current line in view (with some lines above for context)
+        if 0 <= index < len(self.line_widgets):
+            center_offset = 2  # Show 2 lines above the current line when possible
+            center_index = max(0, index - center_offset)
+            self.scroll.scroll_to_widget(self.line_widgets[center_index], animate=False)
+
     def _clean_lrc(self, lrc_text):
-        """Remove timestamps like [00:12.34] from LRC lines."""
+        """Strip LRC timestamps for plain text output (optional utility)."""
         return re.sub(r"\[\d+:\d+\.\d+\]", "", lrc_text).strip()
+        
+    def fetch_enhanced_lyrics(self, artist, title):
+        """Fetch enhanced word-level karaoke lyrics if available."""
+        if not self.syncedlyrics_available:
+            return False
+            
+        try:
+            search_term = f"{title} {artist}"
+            raw_lyrics = self.syncedlyrics.search(search_term, enhanced=True)
+            
+            if raw_lyrics:
+                self.parse_lyrics(raw_lyrics)
+                self.update_content()
+                self.current_line_index = -1
+                return True
+        except Exception as e:
+            print(f"Failed to fetch enhanced lyrics: {e}")
+            
+        return False
+        
+    def fetch_translated_lyrics(self, artist, title, lang_code="en"):
+        """Fetch lyrics with translation in specified language."""
+        if not self.syncedlyrics_available:
+            return False
+            
+        try:
+            search_term = f"{title} {artist}"
+            raw_lyrics = self.syncedlyrics.search(search_term, lang=lang_code)
+            
+            if raw_lyrics:
+                self.parse_lyrics(raw_lyrics)
+                self.update_content()
+                self.current_line_index = -1
+                return True
+        except Exception as e:
+            print(f"Failed to fetch translated lyrics: {e}")
+            
+        return False
         
 class Results(App):
     CSS = """
@@ -602,7 +778,7 @@ class Results(App):
         self.lyrics_display.styles.display = "none"  # Hide initially
         return self.lyrics_display
 
-    def action_toggle_lyrics(self):
+    async def action_toggle_lyrics(self):
         """Toggle the visibility of lyrics display."""
         if not hasattr(self, 'lyrics_display') or self.lyrics_display is None:
             self.lyrics_display = self.query_one("#lyrics_display", Static)
@@ -623,11 +799,12 @@ class Results(App):
                 self.lyrics_display.styles.display = "block"
                 artist = self.currently_playing.get("artist", "")
                 title = self.currently_playing.get("title", "")
-                self.lyrics_display.fetch_lyrics(artist, title)
 
-                # Start background loop
-                if hasattr(self, 'lyrics_display') and self.lyrics_display:
-                    self.lyrics_display.visible = True
+                # Fetch and start synced scrolling if available
+                if self.lyrics_display.fetch_lyrics(artist, title):
+                    await self.lyrics_display.start_lyrics_loop()
+
+                self.lyrics_display.visible = True
                 self.notify("Showing lyrics", title="Lyrics")
             else:
                 self.notify("No track currently playing", title="Lyrics")
@@ -635,6 +812,7 @@ class Results(App):
             self.lyrics_display.stop_lyrics_loop()
             self.lyrics_display.styles.display = "none"
             self.notify("Hiding lyrics", title="Lyrics")
+
 
     def action_toggle_play(self):
         self.toggle_play()
