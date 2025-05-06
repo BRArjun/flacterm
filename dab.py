@@ -9,15 +9,22 @@ from rich.prompt import Prompt
 from urllib.parse import urlencode
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Static
+from textual.scroll_view import ScrollView
+from textual.widget import Widget
+from textual.reactive import reactive
+from textual.containers import ScrollableContainer
 from textual.containers import Vertical, Container
 from math import ceil
 import vlc
+import re
 import threading
 import time
 from rich.text import Text
 from textual.widgets import Input
 from textual.containers import Horizontal
 from textual.widgets import Static
+import asyncio
+from urllib.parse import quote
 
 # Constants
 ITEMS_PER_PAGE = 10
@@ -98,9 +105,21 @@ class AudioPlayer:
             self.position = 0
             self.duration = 0
 
+    def get_current_time(self):
+        return self.position
+
 async def on_input_submitted(self, event: Input.Submitted) -> None:
     # Do nothing on enter
     pass
+
+async def on_timer(self):
+    """Periodic update for syncing lyrics with playback."""
+    if hasattr(self, "lyrics_display") and self.lyrics_display:
+        pos = self.get_current_playback_position()
+        self.lyrics_display.update_position(pos)
+
+def get_current_playback_position(self):
+    return self.player.get_current_time()
 
 def search_dab(query: str, search_type: str = "track", offset: int = 0):
     base_url = get_base_url()
@@ -156,6 +175,96 @@ def get_track_detail(track_id):
         print(f"[red]Failed to get track details[/red]: {e}")
     return None
 
+
+class LyricsDisplay(Widget):
+    def compose(self):
+        """Compose method to define widget structure."""
+        self.scroll = ScrollableContainer(id="lyrics_display")
+        self.lyrics_static = Static("Waiting for lyrics...", id="lyrics_text")
+        yield self.scroll
+
+    def on_mount(self):
+        """Setup initial state and properties when widget is mounted."""
+        self.styles.height = "80%"
+        self.lyrics_static.update("Waiting for lyrics...")
+        self.has_lyrics = False
+        self.lyrics_data = {}
+        self.lyrics_lines = []
+        self.current_line_index = 0
+        self.lyric_task = None
+
+        # Mount the Static widget after the ScrollableContainer is mounted
+        self.scroll.mount(self.lyrics_static)
+
+    def stop_lyrics_loop(self):
+        """Stop the lyrics loop if it's running."""
+        if self.lyric_task:
+            self.lyric_task.cancel()
+            self.lyric_task = None
+
+    def parse_lyrics(self, raw_lyrics: str):
+        """Parse LRC format to a list of (time, text) tuples."""
+        self.lyrics_lines = []
+        for line in raw_lyrics.splitlines():
+            # Match timestamp and lyrics in the LRC format
+            match = re.match(r"\[([0-9]+:[0-9]+\.[0-9]+)\](.*)", line)
+            if match:
+                time_str, text = match.groups()
+                minutes, seconds = map(float, time_str.split(":"))
+                timestamp = minutes * 60 + seconds
+                self.lyrics_lines.append((timestamp, text.strip()))
+        self.lyrics_lines.sort()  # Sort by timestamp
+
+    def update_content(self):
+        """Update lyrics display content."""
+        if self.has_lyrics:
+            # Update the static widget with lyrics content
+            content = "\n".join([line for _, line in self.lyrics_lines])
+        else:
+            content = "Lyrics not found."
+        self.lyrics_static.update(content)
+
+    def fetch_lyrics(self, artist, title):
+        """Fetch lyrics from the API using the provided function."""
+        if not artist or not title:
+            self.has_lyrics = False
+            self.lyrics_data = {}
+            self.lyrics_lines = []
+            self.update_content()
+            return False
+
+        base_url = get_base_url()  # Using the existing function from your code
+        url = f"{base_url}/lyrics?artist={requests.utils.quote(artist)}&title={requests.utils.quote(title)}"
+        
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                if data and "lyrics" in data and data["lyrics"]:
+                    self.lyrics_data = data
+                    self.parse_lyrics(data["lyrics"])
+                    self.has_lyrics = True
+                    self.current_line_index = 0
+                    self.update_content()
+                    return True
+                else:
+                    self.has_lyrics = False
+                    self.update_content()
+                    return False
+            else:
+                self.has_lyrics = False
+                self.update_content()
+                return False
+        except Exception as e:
+            print(f"Failed to fetch lyrics: {e}")
+            self.has_lyrics = False
+            self.update_content()
+            return False
+
+    def _clean_lrc(self, lrc_text):
+        """Remove timestamps like [00:12.34] from LRC lines."""
+        return re.sub(r"\[\d+:\d+\.\d+\]", "", lrc_text).strip()
+        
 class Results(App):
     CSS = """
     #progress_bar_content {
@@ -180,7 +289,8 @@ class Results(App):
     ("escape", "stop_playback", "Stop"),
     #("h", "fast_forward", "Forward"),
     #("g", "rewind", "Rewind"),
-    ("ctrl+s", "submit_search", "Submit Search")
+    ("ctrl+s", "submit_search", "Submit Search"),
+    ("l", "toggle_lyrics", "Show/Hide Lyrics")
     #("r", "toggle_repeat", "Repeat Mode")
 ]
 
@@ -197,39 +307,36 @@ class Results(App):
         self.currently_playing = None
         self.is_paused = False
         self.repeat = False
+        # Initialize lyrics_display as None
+        self.lyrics_display = None
 
     def compose(self) -> ComposeResult:
-        # Header displaying the current search query
         yield Header(f"DAB Terminal - Search: '{self.query}'")
-        
-        # Main content area
+
         with Vertical():
-            # Search input, hidden initially
             self.search_input = Input(placeholder="Search for a new track...", id="search_input")
             self.search_input.styles.display = "none"
             yield self.search_input
-            
-            # Static text displaying the current track status
+
             self.now_playing = Static("Not Playing", id="now_playing")
             yield self.now_playing
-            
-            # DataTable for the search results
+
+            self.lyrics_display = LyricsDisplay(id="lyrics_display")
+            yield self.lyrics_display  # Scrollable container with lyrics
+            self.lyrics_display.styles.display = "none"  # Hide initially
+
             self.table = DataTable(id="results_table")
             yield self.table
-            
-            # Static text for pagination info
+
             self.pagination = Static(id="pagination")
             yield self.pagination
-            
-            # Static text for additional information
+
             self.info = Static("", id="info")
             yield self.info
 
-        # Progress bar - positioned above the footer but still visible
         self.progress_bar_content = Static("", id="progress_bar_content")
         yield self.progress_bar_content
-        
-        # Footer section
+
         yield Footer(id="footer")
 
     def on_mount(self):
@@ -242,8 +349,15 @@ class Results(App):
         self.player.set_on_end_callback(self.on_track_end)
         self.query_focus = False
 
+        self.lyrics_display = self.query_one("#lyrics_display", LyricsDisplay)
+        self.lyrics_display.styles.display = "none"
+        
+    def get_current_playback_position(self):
+        """Return current playback time in seconds from player."""
+        return self.player.get_current_time()
+
     def update_progress(self, position, duration):
-        """Updates the progress bar display as the song plays."""
+        """Updates the progress bar display as the song plays and updates lyrics."""
         if duration > 0:
             # Calculate the percentage of the song played
             percent = (position / duration)
@@ -263,6 +377,10 @@ class Results(App):
 
             # Update the progress bar display
             self.progress_bar_content.update(text)
+            
+            # Update lyrics position if visible
+            if self.lyrics_display.styles.display != "none":
+                self.lyrics_display.update_position(position)
     
     def on_track_end(self):
         """Handles what happens when the track ends."""
@@ -309,6 +427,13 @@ class Results(App):
         self.is_paused = False
         repeat_status = "[Repeat ON]" if self.repeat else ""
         self.now_playing.update(f"Now Playing: {track.get('title')} - {track.get('artist')} {repeat_status}")
+        
+        # Fetch lyrics if the lyrics display is visible
+        if self.lyrics_display.styles.display != "none":
+            artist = track.get("artist", "")
+            title = track.get("title", "")
+            self.lyrics_display.fetch_lyrics(artist, title)
+        
         self.notify(f"Playing: {track.get('title')}", title="Now Playing")
 
     def action_play_selected(self):
@@ -470,6 +595,46 @@ class Results(App):
             self.search_input.styles.display = "none"
             self.set_focus(self.table)
             self.query_focus = False
+    
+    def setup_lyrics_display(self):
+        """Set up the lyrics display widget."""
+        self.lyrics_display = LyricsDisplay(id="lyrics_display")
+        self.lyrics_display.styles.display = "none"  # Hide initially
+        return self.lyrics_display
+
+    def action_toggle_lyrics(self):
+        """Toggle the visibility of lyrics display."""
+        if not hasattr(self, 'lyrics_display') or self.lyrics_display is None:
+            self.lyrics_display = self.query_one("#lyrics_display", Static)
+            if not self.lyrics_display:
+                self.notify("Lyrics display not available", title="Error")
+                return
+
+        if not isinstance(self.lyrics_display, LyricsDisplay):
+            old_display = self.lyrics_display
+            self.lyrics_display = LyricsDisplay(id="lyrics_display_new")
+            if old_display.parent:
+                old_display.parent.mount(self.lyrics_display, before=old_display)
+                old_display.remove()
+            self.lyrics_display.styles.display = "none"
+
+        if self.lyrics_display.styles.display == "none":
+            if self.currently_playing:
+                self.lyrics_display.styles.display = "block"
+                artist = self.currently_playing.get("artist", "")
+                title = self.currently_playing.get("title", "")
+                self.lyrics_display.fetch_lyrics(artist, title)
+
+                # Start background loop
+                if hasattr(self, 'lyrics_display') and self.lyrics_display:
+                    self.lyrics_display.visible = True
+                self.notify("Showing lyrics", title="Lyrics")
+            else:
+                self.notify("No track currently playing", title="Lyrics")
+        else:
+            self.lyrics_display.stop_lyrics_loop()
+            self.lyrics_display.styles.display = "none"
+            self.notify("Hiding lyrics", title="Lyrics")
 
     def action_toggle_play(self):
         self.toggle_play()
