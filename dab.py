@@ -583,8 +583,10 @@ class Results(App):
             self.progress_visual = Static("▕░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▏")
             yield self.progress_visual
 
-            self.progress_bar_content = Static("0:00 / 0:00", id="progress-time")
-            yield self.progress_bar_content
+            yield Static(id="progress_bar")
+
+            # self.progress_bar_content = Static("0:00 / 0:00", id="progress-time")
+            # yield self.progress_bar_content
 
             self.pagination = Static(id="pagination")
             yield self.pagination
@@ -620,7 +622,7 @@ class Results(App):
         self.player.set_on_end_callback(self.on_track_end)
         
         # Set initial progress display
-        self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
+        # self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
         
         # Configure lyrics display
         self.lyrics_display = self.query_one("#lyrics_display")
@@ -722,6 +724,24 @@ class Results(App):
         """Return current playback time in seconds from player."""
         return self.player.get_current_time()
 
+    def update_progress_bar(self, position: float, duration: float):
+        """Update a simple textual progress bar."""
+        bar_width = 40  # width of the progress bar
+        if duration <= 0:
+            progress_text = "0:00 / 0:00"
+            bar = "▕" + "░" * bar_width + "▏"
+        else:
+            percent = min(position / duration, 1.0)
+            filled = int(bar_width * percent)
+            empty = bar_width - filled
+            minutes_pos, seconds_pos = divmod(int(position), 60)
+            minutes_dur, seconds_dur = divmod(int(duration), 60)
+            time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d}"
+            bar = f"▕{'█' * filled}{'░' * empty}▏"
+            progress_text = f"{bar} {time_text}"
+
+        self.query_one("#progress_bar", Static).update(progress_text)
+
     def _update_progress_ui(self, position, duration):
         """Updates the timestamp display on the main thread."""
         if not self.progress_bar_content or duration <= 0:
@@ -756,20 +776,15 @@ class Results(App):
         if not self.progress_bar_content or duration <= 0:
             return
         
-        # Calculate the percentage of the song played
-        percent = min(position / duration, 1.0)  # Ensure we don't exceed 100%
-        bar_width = 30  # Width of the progress bar
-        filled = int(percent * bar_width)
+        bar_width = 80
+        percent = min(position / duration, 1.0)
+        filled = int(bar_width * percent)
         empty = bar_width - filled
-
-        # Calculate the current and total time in minutes and seconds
-        minutes_pos = int(position // 60)
-        seconds_pos = int(position % 60)
-        minutes_dur = int(duration // 60)
-        seconds_dur = int(duration % 60)
-
-        # Create a text-based progress bar with bright fill
-        bar = "▕" + "█" * filled + "░" * empty + "▏"
+        minutes_pos, seconds_pos = divmod(int(position), 60)
+        minutes_dur, seconds_dur = divmod(int(duration), 60)
+        time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d}"
+        bar = f"▕{'█' * filled}{'░' * empty}▏"
+        progress_text = f"{bar} {time_text}"
         
         # Determine playback status text
         status = "(Paused)" if self.is_paused else "(Playing)"
@@ -781,7 +796,7 @@ class Results(App):
         
         # Update the components
         self.progress_visual.update(bar)
-        self.progress_bar_content.update(time_text)
+        self.query_one("#progress_bar", Static).update(progress_text)
         
         # Update lyrics position if visible
         if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
