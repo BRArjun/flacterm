@@ -3,8 +3,27 @@ API utilities for interacting with the music service.
 """
 import requests
 import base64
+import os
+import threading
 from urllib.parse import urlencode, quote
 from config import _ENCODED_API, console
+
+DOWNLOAD_DIR = "YourDownloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:136.0) Gecko/20100101 Firefox/136.0',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'Sec-GPC': '1',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Priority': 'u=0, i'
+}
 
 def get_base_url():
     """Decode and return the base API URL."""
@@ -102,3 +121,30 @@ def get_track_detail(track_id):
     except Exception as e:
         console.print(f"[red]Failed to get track details[/red]: {e}")
     return None
+
+def _download_worker(url: str, filename: str):
+    """Worker function to download a file in the background."""
+    try:
+        with requests.get(url, headers=HEADERS, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        console.print(f"[green]Download complete:[/green] {file_path}")
+    except Exception as e:
+        console.print(f"[red]Download failed[/red]: {e}")
+
+def download_track(track_id: str) -> str:
+    """Get the stream URL and download it in background."""
+    stream_url = get_streaming_url(track_id)
+    if not stream_url:
+        return None
+
+    filename = f"{track_id}.flac"
+
+    thread = threading.Thread(target=_download_worker, args=(stream_url, filename), daemon=True)
+    thread.start()
+
+    return os.path.join(DOWNLOAD_DIR, filename)

@@ -8,10 +8,9 @@
 -- Low Priority
 
 - write a good readme
-- modularise the code
 - implement album support from the api
 - improve UI
-- downloading support
+- fix download and playback simultaneous issues
 - make api requests faster or if there are too many results batch call the api
 - caching
 

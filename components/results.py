@@ -10,6 +10,7 @@ from rich.table import Table
 from math import ceil
 import threading
 import time
+import os
 import re
 import asyncio
 
@@ -20,7 +21,8 @@ from utils.api import (
     fetch_all_results,
     get_streaming_url,
     get_track_detail,
-    get_base_url
+    get_base_url,
+    download_track
 )
 
 # Constants
@@ -91,7 +93,8 @@ class Results(App):
         ("ctrl+s", "submit_search", "Submit Search"),
         ("l", "toggle_lyrics", "Show/Hide Lyrics"),
         ("r", "toggle_repeat", "Repeat Mode"),
-        ("v", "toggle_keybinds", "Toggle keybindings help")
+        ("v", "toggle_keybinds", "Toggle keybindings help"),
+        ("d", "download_hovered_track", "Download Track")
     ]
 
     def __init__(self, results=None, search_type="track", query=""):
@@ -442,6 +445,57 @@ class Results(App):
         else:
             self.keybinds_display.styles.display = "none"
             self.notify("Hiding keybindings", title="Help")
+
+    async def action_download_hovered_track(self):
+        """Download the hovered track from results table."""
+        if not self.table or not self.results:
+            self.notify("No table or results loaded", title="Error")
+            return
+
+        cursor_row = self.table.cursor_row
+        if cursor_row is None or cursor_row >= len(self.displayed_results):
+            self.notify("Invalid selection", title="Download Failed")
+            return
+
+        track = self.displayed_results[cursor_row]
+        track_id = track.get("id")
+        title = track.get("title", "Unknown Track")
+
+        if not track_id:
+            self.notify("Track ID missing.", title="Download Failed")
+            return
+
+        # Pause playback if needed
+        was_playing = False
+        if self.player and self.player.is_playing:
+            was_playing = True
+            self.player.pause()
+
+        # Notify that download has started
+        self.notify(f"Downloading {title}...", title="Download", timeout=3)
+
+        def on_download_complete():
+            self.notify(f"✅ Download complete: {title}", title="Finished", timeout=5)
+            if was_playing:
+                self.player.resume()
+
+        def background_download():
+            try:
+                file_path = download_track(track_id)
+                if not file_path:
+                    raise ValueError("Failed to get streaming URL")
+
+                # Wait for the file to be fully written
+                while not os.path.exists(file_path) or os.path.getsize(file_path) < 10000:
+                    time.sleep(0.2)
+
+                on_download_complete()
+            except Exception as e:
+                self.notify(f"❌ Download failed: {e}", title="Error", timeout=5)
+                if was_playing:
+                    self.player.resume()
+
+        threading.Thread(target=background_download, daemon=True).start()
 
     def format_track_info(self, track):
         """Format track details into a rich table."""
