@@ -36,77 +36,129 @@ def get_base_url():
 
 class AudioPlayer:
     def __init__(self):
+        # Initialize VLC instance and player
         self.instance = vlc.Instance('--no-xlib')
         self.player = self.instance.media_player_new()
         self.media = None
         self.is_playing = False
-        self.duration = 0
-        self.position = 0
-        self._position_thread = None
+        self.is_paused = False
         self._position_callback = None
         self._on_end_callback = None
-        self._end_thread = None
-
+        self._update_thread = None
+        self._running = False
+        
     def play(self, url):
         self.stop()
         self.media = self.instance.media_new(url)
         self.player.set_media(self.media)
         self.player.play()
+
         self.is_playing = True
-        time.sleep(0.5)
-        self.duration = self.player.get_length() / 1000
-        self._start_position_tracking()
-        self._start_end_detection()
+        self.is_paused = False
 
-    def _start_position_tracking(self):
-        if self._position_thread and self._position_thread.is_alive():
-            return
-        def update_position():
-            while self.is_playing:
-                if self.player.is_playing():
-                    self.position = self.player.get_time() / 1000
-                    if self._position_callback:
-                        self._position_callback(self.position, self.duration)
-                time.sleep(0.5)
-        self._position_thread = threading.Thread(target=update_position, daemon=True)
-        self._position_thread.start()
-    
-    def _start_end_detection(self):
-        if self._end_thread and self._end_thread.is_alive():
-            return
-        def check_end():
-            while self.is_playing:
-                if self.duration > 0 and self.player.get_time() >= self.player.get_length() - 500:
+        # Wait until VLC reports it's playing
+        max_tries = 30
+        for _ in range(max_tries):
+            state = self.player.get_state()
+            if state == vlc.State.Playing:
+                break
+            time.sleep(0.1)
+
+        self._running = True
+        self._update_thread = threading.Thread(target=self._update_position, daemon=True)
+        self._update_thread.start()
+        
+    def _update_position(self):
+        """Thread that updates the position and checks for track end."""
+        while self._running and self.is_playing:
+            if not self.is_paused and self.player.is_playing():
+                # Get current position and duration in milliseconds
+                position_ms = self.player.get_time()
+                duration_ms = self.player.get_length()
+                
+                # Convert to seconds for the callback
+                position_sec = position_ms / 1000 if position_ms >= 0 else 0
+                duration_sec = duration_ms / 1000 if duration_ms > 0 else 0
+                
+                # Call the position callback if set
+                if self._position_callback and duration_sec > 0:
+                    try:
+                        self._position_callback(position_sec, duration_sec)
+                    except Exception as e:
+                        print(f"Error in position callback: {e}")
+                
+                # Check if track has ended
+                state = self.player.get_state()
+                if state == vlc.State.Ended or (duration_ms > 0 and position_ms >= duration_ms - 500):
                     if self._on_end_callback:
-                        self._on_end_callback()
+                        try:
+                            self._on_end_callback()
+                        except Exception as e:
+                            print(f"Error in end callback: {e}")
                     break
-                time.sleep(0.5)
-        self._end_thread = threading.Thread(target=check_end, daemon=True)
-        self._end_thread.start()
-
+            
+            # Sleep briefly to avoid consuming too much CPU
+            time.sleep(0.25)
+        
     def set_position_callback(self, callback):
+        """Set the callback function for position updates."""
         self._position_callback = callback
-    
+        
     def set_on_end_callback(self, callback):
+        """Set the callback function for end of playback."""
         self._on_end_callback = callback
-
+        
     def pause(self):
-        if self.is_playing:
+        """Pause playback."""
+        if self.is_playing and not self.is_paused:
             self.player.pause()
-
+            self.is_paused = True
+            
     def resume(self):
-        if self.is_playing:
+        """Resume playback after pause."""
+        if self.is_playing and self.is_paused:
             self.player.play()
-
+            self.is_paused = False
+            
+    def toggle_pause(self):
+        """Toggle between play and pause."""
+        if self.is_paused:
+            self.resume()
+        else:
+            self.pause()
+            
     def stop(self):
+        """Stop playback completely."""
+        # Signal thread to stop
+        self._running = False
+        
+        # Stop the player
         if self.is_playing:
             self.player.stop()
             self.is_playing = False
-            self.position = 0
-            self.duration = 0
-
+            self.is_paused = False
+            
+        # Wait for thread to terminate
+        if self._update_thread and self._update_thread.is_alive():
+            self._update_thread.join(timeout=1.0)
+            
     def get_current_time(self):
-        return self.position
+        """Get the current playback position in seconds."""
+        if not self.is_playing:
+            return 0
+        time_ms = self.player.get_time()
+        return time_ms / 1000 if time_ms >= 0 else 0
+    
+    def get_duration(self):
+        """Get the total duration in seconds."""
+        if not self.is_playing:
+            return 0
+        length_ms = self.player.get_length()
+        return length_ms / 1000 if length_ms > 0 else 0
+        
+    def is_currently_playing(self):
+        """Check if player is currently playing (not paused or stopped)."""
+        return self.is_playing and not self.is_paused
 
 async def on_input_submitted(self, event: Input.Submitted) -> None:
     # Do nothing on enter
@@ -181,31 +233,23 @@ class LyricsDisplay(Widget):
         yield self.scroll
 
     def on_mount(self):
-        self.styles.height = 20  # Set height to show a portion of lyrics
+        self.styles.height = 20
         self.has_lyrics = False
-        self.lyrics_lines = []        # List of (timestamp, text)
-        self.line_widgets = []        # List of Static widgets for display
+        self.lyrics_lines = []
+        self.line_widgets = []
         self.current_line_index = -1
-        self.lyric_task = None
-        # Mount an initial placeholder
-        self.scroll.mount(Static("Waiting for lyrics...", id="lyrics_placeholder"))
-        # Import syncedlyrics here to avoid issues if the package is missing
-        try:
-            import syncedlyrics
-            self.syncedlyrics = syncedlyrics
-            self.syncedlyrics_available = True
-        except ImportError:
-            print("syncedlyrics package not found. Please install it with: pip install syncedlyrics")
-            self.syncedlyrics_available = False
 
-    def stop_lyrics_loop(self):
-        """Stop the lyrics playback loop if running."""
-        if self.lyric_task:
-            self.lyric_task.cancel()
-            self.lyric_task = None
+        self.scroll.mount(Static("Waiting for lyrics...", id="lyrics_placeholder"))
+
+        try:
+            from lrclib import LrcLibAPI
+            self.api = LrcLibAPI(user_agent="music-player/1.0.0")
+            self.lrclib_available = True
+        except ImportError:
+            print("lrclib package not found. Please install it with: pip install lrclibapi")
+            self.lrclib_available = False
 
     def parse_lyrics(self, raw_lyrics: str):
-        """Parse LRC format to list of (timestamp, line) tuples."""
         self.lyrics_lines = []
         for line in raw_lyrics.splitlines():
             match = re.match(r"\[([0-9]+):([0-9]+\.[0-9]+)\](.*)", line)
@@ -214,83 +258,67 @@ class LyricsDisplay(Widget):
                 timestamp = int(min_str) * 60 + float(sec_str)
                 self.lyrics_lines.append((timestamp, text.strip()))
         
-        # Make sure we have something after parsing
         if not self.lyrics_lines:
             self.has_lyrics = False
-            print("No lyrics lines were parsed from the raw lyrics")
         else:
             self.lyrics_lines.sort()
             self.has_lyrics = True
 
     def update_content(self):
-        """Clear old lyrics and add new ones as Static widgets."""
-        # First, clear the scroll container
         self.scroll.remove_children()
-        self.line_widgets = []  # Clear the list of line widgets
+        self.line_widgets = []
 
         if self.has_lyrics and self.lyrics_lines:
-            # Add each lyric line as a Static widget
             for _, text in self.lyrics_lines:
                 widget = Static(text)
                 self.scroll.mount(widget)
                 self.line_widgets.append(widget)
-            
-            # Force a refresh
             self.scroll.refresh()
         else:
-            # Display a message if no lyrics
             self.scroll.mount(Static("Lyrics not found."))
             self.scroll.refresh()
 
-    def fetch_lyrics(self, artist, title):
-        """Fetch LRC-style synced lyrics using syncedlyrics library."""
+    def fetch_lyrics(self, artist, title, album=None, duration=None):
         if not artist or not title:
             self.has_lyrics = False
             self.lyrics_lines = []
             self.update_content()
             return False
 
-        if not self.syncedlyrics_available:
+        if not self.lrclib_available:
             self.scroll.remove_children()
-            self.scroll.mount(Static("syncedlyrics library not available. Please install it."))
+            self.scroll.mount(Static("lrclib not available."))
             self.scroll.refresh()
             return False
 
         try:
-            # Show status while fetching
             self.scroll.remove_children()
             self.scroll.mount(Static(f"Fetching lyrics for '{title}' by '{artist}'..."))
             self.scroll.refresh()
-            
-            # Create search term combining artist and title
-            search_term = f"{title} {artist}"
-            
-            # Try to get synced lyrics first
-            raw_lyrics = self.syncedlyrics.search(search_term, synced_only=True)
-            lyrics_type = "synced"
-            
-            # If no synced lyrics found, try plain lyrics as fallback
-            if not raw_lyrics:
-                print("No synced lyrics found, trying plain text")
-                raw_lyrics = self.syncedlyrics.search(search_term, plain_only=True)
-                lyrics_type = "plain text"
-            
+
+            if album or duration:
+                lyrics_result = self.api.get_lyrics(track_name=title, artist_name=artist, album_name=album, duration=duration)
+                raw_lyrics = lyrics_result.synced_lyrics or lyrics_result.plain_lyrics
+            else:
+                results = self.api.search_lyrics(track_name=title, artist_name=artist)
+                if results:
+                    lyrics_result = self.api.get_lyrics_by_id(results[0].id)
+                    raw_lyrics = lyrics_result.synced_lyrics or lyrics_result.plain_lyrics
+                else:
+                    raw_lyrics = None
+
             if raw_lyrics:
                 self.parse_lyrics(raw_lyrics)
-                # Update content after we've parsed lyrics
                 self.update_content()
                 self.current_line_index = -1
-                # Show a quick notification about the lyrics type
-                print(f"Found {lyrics_type} lyrics with {len(self.lyrics_lines)} lines")
                 return True
             else:
-                print(f"No lyrics found for {search_term}")
                 self.scroll.remove_children()
-                self.scroll.mount(Static(f"No lyrics found for '{title}' by '{artist}'"))
+                self.scroll.mount(Static("No lyrics found"))
                 self.scroll.refresh()
+
         except Exception as e:
-            print(f"Failed to fetch lyrics: {e}")
-            # Display the error in the UI
+            print(f"Error fetching lyrics: {e}")
             self.scroll.remove_children()
             self.scroll.mount(Static(f"Error fetching lyrics: {str(e)}"))
             self.scroll.refresh()
@@ -298,62 +326,6 @@ class LyricsDisplay(Widget):
         self.has_lyrics = False
         self.update_content()
         return False
-
-    async def start_lyrics_loop(self, current_position=0.0):
-        """Start scrolling through lyrics based on LRC timestamps.
-        
-        Args:
-            current_position: Current playback position in seconds
-        """
-        if not self.has_lyrics or not self.lyrics_lines:
-            print("Cannot start lyrics loop: no lyrics available")
-            return
-
-        self.stop_lyrics_loop()
-        self.lyric_task = asyncio.create_task(self._lyrics_loop(current_position))
-
-    async def _lyrics_loop(self, start_position=0.0):
-        """Loop that highlights lyrics in sync with timestamps.
-        
-        Args:
-            start_position: Start position in the song (in seconds)
-        """
-        start_time = time.monotonic()
-        total = len(self.lyrics_lines)
-        
-        print(f"Starting lyrics loop with {total} lines at position {start_position}s")
-        
-        # Find the correct starting line based on current playback position
-        starting_line = 0
-        for i, (timestamp, _) in enumerate(self.lyrics_lines):
-            if timestamp > start_position:
-                break
-            starting_line = i
-        
-        # If we're starting mid-song, immediately show the current line
-        if starting_line > 0:
-            self.current_line_index = starting_line
-            await self.highlight_line(starting_line)
-            
-        # Start from the next line that hasn't been played yet
-        for i in range(starting_line + 1, len(self.lyrics_lines)):
-            timestamp, _ = self.lyrics_lines[i]
-            
-            # Calculate the time until this lyric should appear
-            now = time.monotonic()
-            elapsed = now - start_time + start_position  # Adjust for starting position
-            target_time = timestamp
-            delay = max(0, target_time - elapsed)
-            
-            # Only wait if there's actually time to wait
-            if delay > 0:
-                await asyncio.sleep(delay)
-            
-            # Update the current line
-            self.current_line_index = i
-            await self.highlight_line(i)
-
-        self.lyric_task = None
 
     async def highlight_line(self, index: int):
         """Highlight the current line and scroll to it, adding an arrow to the current line."""
@@ -399,76 +371,178 @@ class LyricsDisplay(Widget):
             center_index = max(0, index - center_offset)
             self.scroll.scroll_to_widget(self.line_widgets[center_index], animate=False)
 
-    def _clean_lrc(self, lrc_text):
-        """Strip LRC timestamps for plain text output (optional utility)."""
-        return re.sub(r"\[\d+:\d+\.\d+\]", "", lrc_text).strip()
-        
-    def fetch_enhanced_lyrics(self, artist, title):
-        """Fetch enhanced word-level karaoke lyrics if available."""
-        if not self.syncedlyrics_available:
+    def search_lyrics(self, query):
+        """Search for lyrics using a general query."""
+        if not self.lrclib_available:
+            self.scroll.remove_children()
+            self.scroll.mount(Static("lrclib library not available. Please install it."))
+            self.scroll.refresh()
+            return None
+            
+        try:
+            # Show status while searching
+            self.scroll.remove_children()
+            self.scroll.mount(Static(f"Searching for lyrics: '{query}'..."))
+            self.scroll.refresh()
+            
+            # Search for lyrics
+            results = self.api.search_lyrics(track_name=query)
+            
+            if results:
+                # Format results for display
+                self.scroll.remove_children()
+                self.scroll.mount(Static(f"Found {len(results)} results for '{query}':"))
+                
+                # Display up to 10 results
+                for i, result in enumerate(results[:10]):
+                    info = f"{i+1}. {result.artist_name} - {result.track_name}"
+                    if result.album_name:
+                        info += f" ({result.album_name})"
+                    self.scroll.mount(Static(info))
+                
+                self.scroll.refresh()
+                return results
+            else:
+                self.scroll.remove_children()
+                self.scroll.mount(Static(f"No results found for '{query}'"))
+                self.scroll.refresh()
+                return None
+                
+        except Exception as e:
+            print(f"Failed to search lyrics: {e}")
+            self.scroll.remove_children()
+            self.scroll.mount(Static(f"Error searching lyrics: {str(e)}"))
+            self.scroll.refresh()
+            return None
+            
+    def get_lyrics_by_result(self, result_index, results):
+        """Get lyrics from a specific search result."""
+        if not results or result_index >= len(results):
             return False
             
         try:
-            search_term = f"{title} {artist}"
-            raw_lyrics = self.syncedlyrics.search(search_term, enhanced=True)
+            # Show status while fetching
+            self.scroll.remove_children()
+            self.scroll.mount(Static("Fetching lyrics from selected result..."))
+            self.scroll.refresh()
+            
+            # Get lyrics by ID
+            lyrics_result = self.api.get_lyrics_by_id(results[result_index].id)
+            raw_lyrics = lyrics_result.synced_lyrics or lyrics_result.plain_lyrics
             
             if raw_lyrics:
                 self.parse_lyrics(raw_lyrics)
                 self.update_content()
                 self.current_line_index = -1
                 return True
+            else:
+                self.scroll.remove_children()
+                self.scroll.mount(Static("No lyrics found in the selected result"))
+                self.scroll.refresh()
+                return False
+                
         except Exception as e:
-            print(f"Failed to fetch enhanced lyrics: {e}")
-            
-        return False
-        
-    def fetch_translated_lyrics(self, artist, title, lang_code="en"):
-        """Fetch lyrics with translation in specified language."""
-        if not self.syncedlyrics_available:
+            print(f"Failed to fetch lyrics from result: {e}")
+            self.scroll.remove_children()
+            self.scroll.mount(Static(f"Error fetching lyrics: {str(e)}"))
+            self.scroll.refresh()
             return False
-            
-        try:
-            search_term = f"{title} {artist}"
-            raw_lyrics = self.syncedlyrics.search(search_term, lang=lang_code)
-            
-            if raw_lyrics:
-                self.parse_lyrics(raw_lyrics)
-                self.update_content()
-                self.current_line_index = -1
-                return True
-        except Exception as e:
-            print(f"Failed to fetch translated lyrics: {e}")
-            
-        return False
-        
+    
+    def update_position(self, position_seconds: float):
+        """Highlight the current lyrics line based on the song's progress."""
+        if not self.has_lyrics or not self.lyrics_lines:
+            return
+
+        # Find the last lyric line that should be shown for the current time
+        index = -1
+        for i, (timestamp, _) in enumerate(self.lyrics_lines):
+            if position_seconds >= timestamp:
+                index = i
+            else:
+                break
+
+        # Avoid unnecessary updates
+        if index == self.current_line_index or index == -1:
+            return
+
+        self.current_line_index = index
+
+        # Update styles for all lines
+        for i, widget in enumerate(self.line_widgets):
+            if i == index:
+                widget.update(f"→ {self.lyrics_lines[i][1]}")
+                widget.styles.color = "yellow"
+                widget.styles.bold = True
+            else:
+                widget.update(self.lyrics_lines[i][1])
+                widget.styles.color = None
+                widget.styles.bold = False
+
+        # Scroll to the current line
+        self.scroll.scroll_to_widget(self.line_widgets[index], animate=False)
+
+
 class Results(App):
     CSS = """
-    #progress_bar_content {
+    /* Make sure our timestamp display stays visible at the bottom */
+    #progress_container {
         dock: bottom;
-        height: 1;
+        height: 2;  /* Reduced height since we're removing the visual bar */
+        margin: 0;
+        padding: 0;
         background: $surface;
-        color: $text;
+        border-top: solid $accent;
+    }
+    
+    #progress_bar_content {
         width: 100%;
+        height: 1;
         text-align: center;
-        padding-bottom: 0;
+        color: $text-muted;
+        background: $surface;
+        padding: 0;
+        margin: 0;
+    }
+    
+    /* Style for the timestamp when playing */
+    .playing {
+        color: $success;
+    }
+    
+    .paused {
+        color: $warning;
+    }
+    
+    #footer {
+        dock: bottom;
+    }
+    
+    /* Ensure there's space between the table and the timestamp display */
+    #results_table {
         margin-bottom: 1;
+    }
+    
+    /* Style for the controls hint */
+    #controls_hint {
+        text-align: center;
+        color: $text-muted;
     }
     """
     
     BINDINGS = [
-    ("q", "quit", "Quit"),
-    ("s", "show_info", "Show Info"),
-    ("/", "search", "New Search"),
-    ("n", "next_page", "Next Page"),
-    ("p", "prev_page", "Prev Page"),
-    ("space", "toggle_play", "Play/Pause"),
-    ("escape", "stop_playback", "Stop"),
-    #("h", "fast_forward", "Forward"),
-    #("g", "rewind", "Rewind"),
-    ("ctrl+s", "submit_search", "Submit Search"),
-    ("l", "toggle_lyrics", "Show/Hide Lyrics")
-    #("r", "toggle_repeat", "Repeat Mode")
-]
+        ("q", "quit", "Quit"),
+        ("s", "show_info", "Show Info"),
+        ("/", "search", "New Search"),
+        ("n", "next_page", "Next Page"),
+        ("p", "prev_page", "Prev Page"),
+        ("space", "toggle_play", "Play/Pause"),
+        ("escape", "stop_playback", "Stop"),
+        ("h", "fast_forward", "Forward"),
+        ("g", "rewind", "Rewind"),
+        ("ctrl+s", "submit_search", "Submit Search"),
+        ("l", "toggle_lyrics", "Show/Hide Lyrics")
+        #("r", "toggle_repeat", "Repeat Mode")
+    ]
 
     def __init__(self, results=None, search_type="track", query=""):
         super().__init__()
@@ -483,12 +557,14 @@ class Results(App):
         self.currently_playing = None
         self.is_paused = False
         self.repeat = False
-        # Initialize lyrics_display as None
         self.lyrics_display = None
-
+        self.progress_bar_content = None
+        self.progress_ticker = None  # For regular UI updates
+        
     def compose(self) -> ComposeResult:
         yield Header(f"DAB Terminal - Search: '{self.query}'")
 
+        # Main content
         with Vertical():
             self.search_input = Input(placeholder="Search for a new track...", id="search_input")
             self.search_input.styles.display = "none"
@@ -498,11 +574,17 @@ class Results(App):
             yield self.now_playing
 
             self.lyrics_display = LyricsDisplay(id="lyrics_display")
-            yield self.lyrics_display  # Scrollable container with lyrics
-            self.lyrics_display.styles.display = "none"  # Hide initially
+            yield self.lyrics_display
+            self.lyrics_display.styles.display = "none"
 
             self.table = DataTable(id="results_table")
             yield self.table
+
+            self.progress_visual = Static("▕░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▏")
+            yield self.progress_visual
+
+            self.progress_bar_content = Static("0:00 / 0:00", id="progress-time")
+            yield self.progress_bar_content
 
             self.pagination = Static(id="pagination")
             yield self.pagination
@@ -510,57 +592,217 @@ class Results(App):
             self.info = Static("", id="info")
             yield self.info
 
-        self.progress_bar_content = Static("", id="progress_bar_content")
-        yield self.progress_bar_content
+        # Simple timestamp container instead of progress bar
+        with Container(id="progress_container"):
+            yield Static("0:00 / 0:00 (Not Playing)", id="progress_bar_content")  # Time info
+            yield Static("Press SPACE to play/pause | ESC to stop", id="controls_hint")  # Controls hint
 
-        yield Footer(id="footer")
+        # Footer must be after the progress bar
+        yield Footer()
 
     def on_mount(self):
+        """Set up the UI when the app is mounted."""
         self.table.cursor_type = "row"
         self.table.zebra_stripes = True
         self.table.show_cursor = True
         self.table.focus()
-        self.update_page()
+        self.update_page()  # Assuming this method exists
+        
+        # Get references to progress elements
+        self.progress_bar_content = self.query_one("#progress_bar_content")
+        self.controls_hint = self.query_one("#controls_hint")
+        
+        # Configure initial styles
+        self.progress_bar_content.styles.color = "ansi_bright_white"  # Make text more visible
+        
+        # Set up player callbacks
         self.player.set_position_callback(self.update_progress)
         self.player.set_on_end_callback(self.on_track_end)
-        self.query_focus = False
-
-        self.lyrics_display = self.query_one("#lyrics_display", LyricsDisplay)
+        
+        # Set initial progress display
+        self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
+        
+        # Configure lyrics display
+        self.lyrics_display = self.query_one("#lyrics_display")
         self.lyrics_display.styles.display = "none"
         
+        # Start a regular UI update timer to ensure progress bar updates even if callback is missed
+        self.set_interval(0.5, self.check_progress_updates)
+        
+    def check_progress_updates(self):
+        """Regular timer callback to ensure progress bar updates."""
+        if self.player.is_currently_playing():
+            position = self.player.get_current_time()
+            duration = self.player.get_duration()
+            if duration > 0:
+                self._update_progress_ui(position, duration)
+    
+    def play_track(self, track_info):
+        """Play a track and update the UI accordingly."""
+        if not track_info:
+            return
+            
+        # Store current track info
+        self.currently_playing = track_info
+        self.is_paused = False
+        
+        # Update UI to show what's playing
+        self.now_playing.update(f"Now Playing: {track_info['title']} - {track_info['artist']}")
+        
+        # Reset progress bar with enhanced UI
+        self.progress_bar_content.remove_class("paused")
+        self.progress_bar_content.add_class("playing")
+        
+        self.progress_bar_content.update("0:00 / 0:00 (Loading...)")
+        
+        # Start playback using the URL from track_info
+        stream_url = track_info.get('stream_url')
+        if stream_url:
+            self.player.play(stream_url)
+            # Log that playback has started
+            print(f"Starting playback of {track_info['title']}")
+    
+    def update_progress(self, position, duration):
+        self._update_progress_ui(position, duration)
+
+    def action_toggle_play(self):
+        """Handle play/pause action."""
+        if not self.currently_playing:
+            # Nothing is playing, so try to play the selected track
+            selected_row = self.table.cursor_row
+            if selected_row >= 0 and selected_row < len(self.displayed_results):
+                self.play_track(self.displayed_results[selected_row])
+        else:
+            # Toggle pause/resume on currently playing track
+            if self.is_paused:
+                self.player.resume()
+                self.is_paused = False
+                self.progress_bar_content.remove_class("paused")
+                self.progress_bar_content.add_class("playing")
+                
+                # Update the content to show "Playing" status
+                current_text = self.progress_bar_content.renderable
+                if isinstance(current_text, str) and "(Paused)" in current_text:
+                    new_text = current_text.replace("(Paused)", "(Playing)")
+                    self.progress_bar_content.update(new_text)
+            else:
+                self.player.pause()
+                self.is_paused = True
+                self.progress_bar_content.remove_class("playing")
+                self.progress_bar_content.add_class("paused")
+                
+                # Update the content to show "Paused" status
+                current_text = self.progress_bar_content.renderable
+                if isinstance(current_text, str) and "(Playing)" in current_text:
+                    new_text = current_text.replace("(Playing)", "(Paused)")
+                    self.progress_bar_content.update(new_text)
+                elif isinstance(current_text, str) and not "(Paused)" in current_text:
+                    # If there's no status indicator yet
+                    self.progress_bar_content.update(f"{current_text} (Paused)")
+    
+    def action_stop_playback(self):
+        """Stop the current playback."""
+        self.player.stop()
+        self.currently_playing = None
+        self.is_paused = False
+        self.now_playing.update("Not Playing")
+        
+        # Reset progress display styling
+        self.progress_bar_content.remove_class("playing")
+        self.progress_bar_content.remove_class("paused")
+        
+        # Reset progress display text
+        self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
+        
+        # Hide lyrics display if showing
+        if self.lyrics_display and self.lyrics_display.styles.display != "none":
+            self.lyrics_display.styles.display = "none"
+    
     def get_current_playback_position(self):
         """Return current playback time in seconds from player."""
         return self.player.get_current_time()
 
-    def update_progress(self, position, duration):
-        """Updates the progress bar display as the song plays and updates lyrics."""
-        if duration > 0:
-            # Calculate the percentage of the song played
-            percent = (position / duration)
-            bar_width = 30  # Width of the progress bar
-            filled = int(percent * bar_width)
-            empty = bar_width - filled
+    def _update_progress_ui(self, position, duration):
+        """Updates the timestamp display on the main thread."""
+        if not self.progress_bar_content or duration <= 0:
+            return
+        
+        # Calculate the current and total time in minutes and seconds
+        minutes_pos = int(position // 60)
+        seconds_pos = int(position % 60)
+        minutes_dur = int(duration // 60)
+        seconds_dur = int(duration % 60)
 
-            # Calculate the current and total time in minutes and seconds
-            minutes_pos = int(position // 60)
-            seconds_pos = int(position % 60)
-            minutes_dur = int(duration // 60)
-            seconds_dur = int(duration % 60)
-
-            # Create a text-based progress bar with clear styling
-            bar = "▕" + "█" * filled + "░" * empty + "▏"
-            text = f"{bar} {minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d}"
-
-            # Update the progress bar display
-            self.progress_bar_content.update(text)
+        # Format timestamp with progress percentage
+        percent = min(position / duration * 100, 100)  # Percentage played
+        
+        # Determine playback status text
+        status = "(Paused)" if self.is_paused else "(Playing)"
+        if not self.currently_playing:
+            status = "(Not Playing)"
             
-            # Update lyrics position if visible
-            if self.lyrics_display.styles.display != "none":
-                self.lyrics_display.update_position(position)
-    
+        # Create a clear timestamp with percentage
+        time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d} ({percent:.1f}%) {status}"
+        
+        # Update the component
+        self.progress_bar_content.update(time_text)
+        
+        # Update lyrics position if visible
+        if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
+            self.lyrics_display.update_position(position)
+
+    def _update_progress_ui(self, position, duration):
+        """Updates the UI components on the main thread."""
+        if not self.progress_bar_content or duration <= 0:
+            return
+        
+        # Calculate the percentage of the song played
+        percent = min(position / duration, 1.0)  # Ensure we don't exceed 100%
+        bar_width = 30  # Width of the progress bar
+        filled = int(percent * bar_width)
+        empty = bar_width - filled
+
+        # Calculate the current and total time in minutes and seconds
+        minutes_pos = int(position // 60)
+        seconds_pos = int(position % 60)
+        minutes_dur = int(duration // 60)
+        seconds_dur = int(duration % 60)
+
+        # Create a text-based progress bar with bright fill
+        bar = "▕" + "█" * filled + "░" * empty + "▏"
+        
+        # Determine playback status text
+        status = "(Paused)" if self.is_paused else "(Playing)"
+        if not self.currently_playing:
+            status = "(Not Playing)"
+            
+        # Update the time text and visual bar separately
+        time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d} {status}"
+        
+        # Update the components
+        self.progress_visual.update(bar)
+        self.progress_bar_content.update(time_text)
+        
+        # Update lyrics position if visible
+        if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
+            self.lyrics_display.update_position(position)
+
     def on_track_end(self):
-        """Handles what happens when the track ends."""
-        self.progress_bar_content.update("Playback finished")
+        """Handle what happens when a track finishes playing."""
+        # Need to call from thread to update UI safely
+        self.call_from_thread(self._handle_track_end)
+
+    def _handle_track_end(self):
+        """Handle track end in the main thread."""
+        # Reset the timestamp display with clear end state
+        self.progress_bar_content.update("0:00 / 0:00 (Finished)")
+        
+        # Use existing logic for repeat functionality
+        if self.repeat and self.currently_playing:
+            self.play_track(self.currently_playing)
+        else:
+            self.currently_playing = None
+            self.now_playing.update("Not Playing")
 
     def update_page(self):
         self.table.clear(columns=True)
@@ -778,7 +1020,7 @@ class Results(App):
         self.lyrics_display.styles.display = "none"  # Hide initially
         return self.lyrics_display
 
-    async def action_toggle_lyrics(self):
+    def action_toggle_lyrics(self):
         """Toggle the visibility of lyrics display."""
         if not hasattr(self, 'lyrics_display') or self.lyrics_display is None:
             self.lyrics_display = self.query_one("#lyrics_display", Static)
@@ -799,20 +1041,17 @@ class Results(App):
                 self.lyrics_display.styles.display = "block"
                 artist = self.currently_playing.get("artist", "")
                 title = self.currently_playing.get("title", "")
-
-                # Fetch and start synced scrolling if available
-                if self.lyrics_display.fetch_lyrics(artist, title):
-                    await self.lyrics_display.start_lyrics_loop()
+                
+                # Fetch lyrics (sync highlighting is handled via update_position elsewhere)
+                self.lyrics_display.fetch_lyrics(artist, title)
 
                 self.lyrics_display.visible = True
                 self.notify("Showing lyrics", title="Lyrics")
             else:
                 self.notify("No track currently playing", title="Lyrics")
         else:
-            self.lyrics_display.stop_lyrics_loop()
             self.lyrics_display.styles.display = "none"
             self.notify("Hiding lyrics", title="Lyrics")
-
 
     def action_toggle_play(self):
         self.toggle_play()
