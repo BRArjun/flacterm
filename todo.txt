@@ -10,7 +10,6 @@
 - write a good readme
 - implement album support from the api
 - improve UI
-- fix download and playback simultaneous issues
 - make api requests faster or if there are too many results batch call the api
 - caching
 

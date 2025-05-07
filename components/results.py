@@ -25,60 +25,105 @@ from utils.api import (
     download_track
 )
 
+from components.queue_manager import QueueManager
+from components.queue_display import QueueDisplay
+
+
 # Constants
 ITEMS_PER_PAGE = 10
 console = Console()
 
 class Results(App):
     CSS = """
-    #progress_container {
-    dock: bottom;
-    height: 2;
-    margin: 0;
-    padding: 0;
-    background: transparent;
-    border: none;
-    }
+#progress_container {
+  dock: bottom;
+  height: 2;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
 
-    #progress_visual {
-    width: 100%;
-    height: 1;
-    content-align: center middle;
-    color: $text-muted;
-    background: transparent;
-    padding: 0;
-    margin: 0;
-    }
+#progress_visual {
+  width: 100%;
+  height: 1;
+  content-align: center middle;
+  color: $text-muted;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
 
-    #progress_bar {
-    dock: bottom;
-    text-align: center;
-    height: 1;
-    background: transparent;
-    color: white;
-    width: 100%;
-    padding: 0;
-    margin: 0;
-    }
-    
-    /* Style for the timestamp when playing */
-    .playing {
-        color: $success;
-    }
-    
-    .paused {
-        color: $warning;
-    }
-    
-    #footer {
-        dock: bottom;
-    }
-    
-    /* Ensure there's space between the table and the timestamp display */
-    #results_table {
-        margin-bottom: 1;
-    }
-    """
+#progress_bar {
+  dock: bottom;
+  text-align: center;
+  height: 1;
+  background: transparent;
+  color: white;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+/* Style for the timestamp when playing */
+.playing {
+  color: $success;
+}
+
+.paused {
+  color: $warning;
+}
+
+#footer {
+  dock: bottom;
+}
+
+/* Ensure there's space between the table and the timestamp display */
+#results_table {
+  margin-bottom: 1;
+}
+
+#queue-display {
+  height: auto;
+  max-height: 40vh; /* Adjust height as needed */
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: block;
+  border-top: solid #333;
+}
+
+/* Hide queue when not active */
+#queue-display.hidden {
+  display: none;
+}
+
+/* Additional styles for queue items */
+.queue-item {
+  padding: 1 2;
+}
+
+.queue-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.queue-item.current {
+  background: rgba(255, 255, 255, 0.1);
+  text-style: bold;
+}
+
+/* Empty queue message */
+.empty-queue {
+  text-align: center;
+  padding: 5;
+  color: #888;
+}
+
+/* Queue panel title */
+#queue-display Panel {
+  border: round;
+}
+"""
     
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -94,7 +139,13 @@ class Results(App):
         ("l", "toggle_lyrics", "Show/Hide Lyrics"),
         ("r", "toggle_repeat", "Repeat Mode"),
         ("v", "toggle_keybinds", "Toggle keybindings help"),
-        ("d", "download_hovered_track", "Download Track")
+        ("d", "download_hovered_track", "Download Track"),
+        ("a", "add_to_queue", "Add to queue"),
+        ("t", "toggle_queue", "Toggle queue"),
+        ("y", "remove_from_queue", "Remove from Queue"),
+        ("z", "next_track", "Next Track"),
+        ("x", "previous_track", "Previous Track"),
+        ("c", "clear_queue", "Clear Queue")
     ]
 
     def __init__(self, results=None, search_type="track", query=""):
@@ -114,6 +165,10 @@ class Results(App):
         self.progress_bar_content = None
         self.progress_ticker = None  # For regular UI updates
         self.displayed_results = []  # To keep track of currently displayed results
+        # Initialize queue manager
+        self.queue_manager = QueueManager()
+        # Track visibility of queue
+        self.show_queue = False
         
     def compose(self) -> ComposeResult:
         yield Header(f"DAB Terminal - Search: '{self.query}'")
@@ -144,6 +199,8 @@ class Results(App):
             self.info = Static("", id="info")
             yield self.info
 
+            yield QueueDisplay(self.queue_manager, id="queue-display", classes="hidden")
+
         # Docked progress bar at the bottom
         with Container(id="progress_container"):
             yield Static("", id="progress_bar")  # This gets updated with timestamp + bar
@@ -166,6 +223,8 @@ class Results(App):
         self.player.set_on_end_callback(self.on_track_end)
 
         self.set_interval(0.5, self.check_progress_updates)
+
+        self.query_one("#queue-display").display = False
         
     def check_progress_updates(self):
         """Regular timer callback to ensure progress bar updates."""
@@ -250,10 +309,24 @@ class Results(App):
         if hasattr(self, 'lyrics_display') and self.lyrics_display.styles.display != "none":
             self.lyrics_display.update_position(position)
 
+    def get_selected_track(self):
+        """
+        Get the currently selected track from the data table.
+        Returns:
+            A track dictionary from self.displayed_results or None.
+        """
+        if self.table.cursor_row is not None:
+            index = self.table.cursor_row
+            if 0 <= index < len(self.displayed_results):
+                return self.displayed_results[index]
+        return None
+
     def on_track_end(self):
-        """Handle what happens when a track finishes playing."""
-        # Need to call from thread to update UI safely
-        self.call_from_thread(self._handle_track_end)
+        """Handle end of track by playing the next track in queue if available."""
+        # Check if we should automatically play the next track
+        next_track = self.queue_manager.next_track()
+        if next_track:
+            self.play_track(next_track)
 
     def stop_playback(self):
         if self.currently_playing:
@@ -310,6 +383,27 @@ class Results(App):
             self.current_page += 1
             self.update_page()
 
+    def action_next_track(self):
+        """Play the next track in the queue."""
+        next_track = self.queue_manager.next_track()
+        if next_track:
+            self.play_track(next_track)
+        else:
+            self.notify("No more tracks in queue")
+    
+    def action_previous_track(self):
+        """Play the previous track in the queue."""
+        prev_track = self.queue_manager.previous_track()
+        if prev_track:
+            self.play_track(prev_track)
+        else:
+            self.notify("No previous tracks in queue")
+    
+    def action_clear_queue(self):
+        """Clear the queue."""
+        self.queue_manager.clear_queue()
+        self.notify("Queue cleared")
+    
     def action_prev_page(self):
         """Navigate to the previous page of results."""
         if self.current_page > 0:
@@ -337,6 +431,44 @@ class Results(App):
                 self.player.pause()
                 self.is_paused = True
                 self.notify("Playback paused", title="Playback")
+
+    def action_toggle_queue(self):
+        """Toggle the queue display visibility."""
+        queue_display = self.query_one("#queue-display")
+        self.show_queue = not self.show_queue
+        
+        if self.show_queue:
+            queue_display.remove_class("hidden")
+            queue_display.display = True
+        else:
+            queue_display.add_class("hidden")
+            queue_display.display = False
+    
+    def action_add_to_queue(self):
+        """Add the currently selected track to the queue."""
+        # Get the currently selected track from your existing selection mechanism
+        selected_track = self.get_selected_track()  # You'll need to implement this based on your UI
+        
+        if selected_track:
+            self.queue_manager.add_track(selected_track)
+            self.notify(f"Added '{selected_track.get('title', 'Unknown')}' to queue")
+    
+    def action_remove_from_queue(self):
+        """Remove a track from the queue."""
+        # This might need to prompt the user for which track to remove
+        # or remove the currently highlighted track in the queue
+        if not self.queue_manager.queue:
+            self.notify("Queue is empty")
+            return
+        
+        # For simplicity, remove the currently playing track
+        # In a real implementation, you might want to highlight and select tracks in the queue
+        if self.queue_manager.current_index >= 0:
+            track = self.queue_manager.current_track
+            self.queue_manager.remove_track(self.queue_manager.current_index)
+            self.notify(f"Removed '{track.get('title', 'Unknown')}' from queue")
+        else:
+            self.notify("No track selected in queue")
 
     def action_stop_playback(self):
         """Stop the current playback."""

@@ -29,6 +29,12 @@ class KeybindsDisplay(Static):
             "g     Rewind 5 seconds\n"
             "^s    Submit new search\n"
             "r     Toggle repeat mode\n"
+            "a     Add current track to queue\n"
+            "d     Remove track from queue\n"
+            "Q     Show/hide queue display\n"
+            "N     Play next track in queue\n"
+            "P     Play previous track in queue\n"
+            "C     Clear queue\n"
         )
 
     def render(self):
