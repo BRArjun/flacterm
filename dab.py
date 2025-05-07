@@ -506,24 +506,34 @@ class KeybindsDisplay(Static):
 
 class Results(App):
     CSS = """
-    /* Make sure our timestamp display stays visible at the bottom */
     #progress_container {
-        dock: bottom;
-        height: 2;  /* Reduced height since we're removing the visual bar */
-        margin: 0;
-        padding: 0;
-        background: $surface;
-        border-top: solid $accent;
+    dock: bottom;
+    height: 2;
+    margin: 0;
+    padding: 0;
+    background: transparent;  /* Use a valid color */
+    border: none;
     }
-    
-    #progress_bar_content {
-        width: 100%;
-        height: 1;
-        text-align: center;
-        color: $text-muted;
-        background: $surface;
-        padding: 0;
-        margin: 0;
+
+    #progress_visual {
+    width: 100%;
+    height: 1;
+    content-align: center middle;
+    color: $text-muted;
+    background: transparent;  /* Use a valid color */
+    padding: 0;
+    margin: 0;
+    }
+
+    #progress_bar {
+    dock: bottom;
+    text-align: center;
+    height: 1;
+    background: transparent;  /* No black bar */
+    color: white;
+    width: 100%;
+    padding: 0;
+    margin: 0;
     }
     
     /* Style for the timestamp when playing */
@@ -542,12 +552,6 @@ class Results(App):
     /* Ensure there's space between the table and the timestamp display */
     #results_table {
         margin-bottom: 1;
-    }
-    
-    /* Style for the controls hint */
-    #controls_hint {
-        text-align: center;
-        color: $text-muted;
     }
     """
     
@@ -587,7 +591,7 @@ class Results(App):
     def compose(self) -> ComposeResult:
         yield Header(f"DAB Terminal - Search: '{self.query}'")
 
-        # Main content
+        # Main vertical layout
         with Vertical():
             self.search_input = Input(placeholder="Search for a new track...", id="search_input")
             self.search_input.styles.display = "none"
@@ -601,16 +605,11 @@ class Results(App):
             yield self.now_playing
 
             self.lyrics_display = LyricsDisplay(id="lyrics_display")
-            yield self.lyrics_display
             self.lyrics_display.styles.display = "none"
+            yield self.lyrics_display
 
             self.table = DataTable(id="results_table")
             yield self.table
-
-            self.progress_visual = Static("▕░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▏")
-            yield self.progress_visual
-
-            yield Static(id="progress_bar")
 
             self.pagination = Static(id="pagination")
             yield self.pagination
@@ -618,26 +617,29 @@ class Results(App):
             self.info = Static("", id="info")
             yield self.info
 
+        # Docked progress bar at the bottom
+        with Container(id="progress_container"):
+            yield Static("", id="progress_bar")  # This gets updated with timestamp + bar
+
     def on_mount(self):
         """Set up the UI when the app is mounted."""
         self.table.cursor_type = "row"
         self.table.zebra_stripes = True
         self.table.show_cursor = True
         self.table.focus()
-        self.update_page()  # Assuming this method exists
-        
+        self.update_page()
+
         self.keybinds_display = self.query_one("#keybinds_display")
         self.keybinds_display.styles.display = "none"
-        
-        # Set up player callbacks
-        self.player.set_position_callback(self.update_progress)
-        self.player.set_on_end_callback(self.on_track_end)
-        
-        # Configure lyrics display
+
         self.lyrics_display = self.query_one("#lyrics_display")
         self.lyrics_display.styles.display = "none"
-        
-        # Start a regular UI update timer to ensure progress bar updates even if callback is missed
+
+        # self.progress_visual = self.query_one("#progress_visual", Static)
+
+        self.player.set_position_callback(self.update_progress)
+        self.player.set_on_end_callback(self.on_track_end)
+
         self.set_interval(0.5, self.check_progress_updates)
         
     def check_progress_updates(self):
@@ -668,7 +670,16 @@ class Results(App):
             print(f"Starting playback of {track_info['title']}")
     
     def update_progress(self, position, duration):
-        self._update_progress_ui(position, duration)
+        if duration == 0:
+            percent = 0
+        else:
+            percent = position / duration
+
+        bar_length = 30
+        filled_length = int(bar_length * percent)
+        bar = "▕" + "█" * filled_length + "░" * (bar_length - filled_length) + "▏"
+
+        # self.progress_visual.update(bar)
 
     def action_toggle_play(self):
         """Handle play/pause action."""
@@ -698,74 +709,34 @@ class Results(App):
         """Return current playback time in seconds from player."""
         return self.player.get_current_time()
 
-    def update_progress_bar(self, position: float, duration: float):
-        """Update a simple textual progress bar."""
-        bar_width = 40  # width of the progress bar
-        if duration <= 0:
-            progress_text = ""
-            bar = "▕" + "░" * bar_width + "▏"
-        else:
-            percent = min(position / duration, 1.0)
-            filled = int(bar_width * percent)
-            empty = bar_width - filled
-            minutes_pos, seconds_pos = divmod(int(position), 60)
-            minutes_dur, seconds_dur = divmod(int(duration), 60)
-            time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d}"
-            bar = f"▕{'█' * filled}{'░' * empty}▏"
-            progress_text = f"{bar} {time_text}"
-
-        self.query_one("#progress_bar", Static).update(progress_text)
-
-    def _update_progress_ui(self, position, duration):
-        """Updates the timestamp display on the main thread."""
-        
-        # Calculate the current and total time in minutes and seconds
-        minutes_pos = int(position // 60)
-        seconds_pos = int(position % 60)
-        minutes_dur = int(duration // 60)
-        seconds_dur = int(duration % 60)
-
-        # Format timestamp with progress percentage
-        percent = min(position / duration * 100, 100)  # Percentage played
-        
-        # Determine playback status text
-        status = "(Paused)" if self.is_paused else "(Playing)"
-        if not self.currently_playing:
-            status = "(Not Playing)"
-            
-        # Create a clear timestamp with percentage
-        time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d} ({percent:.1f}%) {status}"
-        
-        # Update lyrics position if visible
-        if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
-            self.lyrics_display.update_position(position)
-
     def _update_progress_ui(self, position, duration):
         """Updates the UI components on the main thread."""
-        bar_width = 80
+        try:
+            progress_bar = self.query_one("#progress_bar", Static)
+            if not progress_bar:
+                return
+            width = progress_bar.size.width or 80  # Fallback if width not yet known
+        except Exception:
+            width = 80
+
+        bar_width = max(width - 20, 10)  # Leave room for time text
         percent = min(position / duration, 1.0)
         filled = int(bar_width * percent)
         empty = bar_width - filled
+        bar = f"▕{'█' * filled}{'░' * empty}▏"
+
         minutes_pos, seconds_pos = divmod(int(position), 60)
         minutes_dur, seconds_dur = divmod(int(duration), 60)
-        time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d}"
-        bar = f"▕{'█' * filled}{'░' * empty}▏"
-        progress_text = f"{bar} {time_text}"
-        
-        # Determine playback status text
         status = "(Paused)" if self.is_paused else "(Playing)"
         if not self.currently_playing:
             status = "(Not Playing)"
-            
-        # Update the time text and visual bar separately
+
         time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d} {status}"
-        
-        # Update the components
-        self.progress_visual.update(bar)
-        self.query_one("#progress_bar", Static).update(progress_text)
-        
-        # Update lyrics position if visible
-        if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
+        progress_text = f"{bar} {time_text}"
+
+        progress_bar.update(progress_text)
+
+        if hasattr(self, 'lyrics_display') and self.lyrics_display.styles.display != "none":
             self.lyrics_display.update_position(position)
 
     def on_track_end(self):
