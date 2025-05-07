@@ -1,3 +1,4 @@
-build
-dist
-dab.spec
+__pycache__
+components/__pycache__
+utils?__pycache__
+dab.py
