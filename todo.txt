@@ -3,12 +3,12 @@
 - implement like support / adding to liked music 
 - creating custom user playlists
 - implement queue function
-- basic media controls like forward - backward - repeat - progress bar(partially implemented)
 - fix vlc errors being shown directly when trying to abruptly stop songs 
 
 -- Low Priority
 
 - write a good readme
+- modularise the code
 - implement album support from the api
 - improve UI
 - downloading support

@@ -482,6 +482,28 @@ class LyricsDisplay(Widget):
         self.scroll.scroll_to_widget(self.line_widgets[index], animate=False)
 
 
+class KeybindsDisplay(Static):
+    def get_keybinds_text(self) -> str:
+        return (
+            "[b]Available Keybindings:[/b]\n\n"
+            "v     Show/hide this help screen\n"
+            "l     Toggle lyrics\n"
+            "space Play/pause\n"
+            "n     Next page\n"
+            "p     Previous page\n"
+            "q     Quit\n"
+            "s     Show track info\n"
+            "/     Start a new search\n"
+            "Esc   Stop playback\n"
+            "h     Fast forward 5 seconds\n"
+            "g     Rewind 5 seconds\n"
+            "^s    Submit new search\n"
+            "r     Toggle repeat mode\n"
+        )
+
+    def render(self):
+        return Panel(self.get_keybinds_text(), title="Keybindings", border_style="cyan")
+
 class Results(App):
     CSS = """
     /* Make sure our timestamp display stays visible at the bottom */
@@ -540,8 +562,9 @@ class Results(App):
         ("h", "fast_forward", "Forward"),
         ("g", "rewind", "Rewind"),
         ("ctrl+s", "submit_search", "Submit Search"),
-        ("l", "toggle_lyrics", "Show/Hide Lyrics")
-        #("r", "toggle_repeat", "Repeat Mode")
+        ("l", "toggle_lyrics", "Show/Hide Lyrics"),
+        ("r", "toggle_repeat", "Repeat Mode"),
+        ("v", "toggle_keybinds", "Toggle keybindings help")
     ]
 
     def __init__(self, results=None, search_type="track", query=""):
@@ -570,6 +593,10 @@ class Results(App):
             self.search_input.styles.display = "none"
             yield self.search_input
 
+            self.keybinds_display = KeybindsDisplay(id="keybinds_display")
+            self.keybinds_display.styles.display = "none"
+            yield self.keybinds_display
+
             self.now_playing = Static("Not Playing", id="now_playing")
             yield self.now_playing
 
@@ -585,22 +612,11 @@ class Results(App):
 
             yield Static(id="progress_bar")
 
-            # self.progress_bar_content = Static("0:00 / 0:00", id="progress-time")
-            # yield self.progress_bar_content
-
             self.pagination = Static(id="pagination")
             yield self.pagination
 
             self.info = Static("", id="info")
             yield self.info
-
-        # Simple timestamp container instead of progress bar
-        with Container(id="progress_container"):
-            yield Static("0:00 / 0:00 (Not Playing)", id="progress_bar_content")  # Time info
-            yield Static("Press SPACE to play/pause | ESC to stop", id="controls_hint")  # Controls hint
-
-        # Footer must be after the progress bar
-        yield Footer()
 
     def on_mount(self):
         """Set up the UI when the app is mounted."""
@@ -610,19 +626,12 @@ class Results(App):
         self.table.focus()
         self.update_page()  # Assuming this method exists
         
-        # Get references to progress elements
-        self.progress_bar_content = self.query_one("#progress_bar_content")
-        self.controls_hint = self.query_one("#controls_hint")
-        
-        # Configure initial styles
-        self.progress_bar_content.styles.color = "ansi_bright_white"  # Make text more visible
+        self.keybinds_display = self.query_one("#keybinds_display")
+        self.keybinds_display.styles.display = "none"
         
         # Set up player callbacks
         self.player.set_position_callback(self.update_progress)
         self.player.set_on_end_callback(self.on_track_end)
-        
-        # Set initial progress display
-        # self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
         
         # Configure lyrics display
         self.lyrics_display = self.query_one("#lyrics_display")
@@ -651,12 +660,6 @@ class Results(App):
         # Update UI to show what's playing
         self.now_playing.update(f"Now Playing: {track_info['title']} - {track_info['artist']}")
         
-        # Reset progress bar with enhanced UI
-        self.progress_bar_content.remove_class("paused")
-        self.progress_bar_content.add_class("playing")
-        
-        self.progress_bar_content.update("0:00 / 0:00 (Loading...)")
-        
         # Start playback using the URL from track_info
         stream_url = track_info.get('stream_url')
         if stream_url:
@@ -679,28 +682,6 @@ class Results(App):
             if self.is_paused:
                 self.player.resume()
                 self.is_paused = False
-                self.progress_bar_content.remove_class("paused")
-                self.progress_bar_content.add_class("playing")
-                
-                # Update the content to show "Playing" status
-                current_text = self.progress_bar_content.renderable
-                if isinstance(current_text, str) and "(Paused)" in current_text:
-                    new_text = current_text.replace("(Paused)", "(Playing)")
-                    self.progress_bar_content.update(new_text)
-            else:
-                self.player.pause()
-                self.is_paused = True
-                self.progress_bar_content.remove_class("playing")
-                self.progress_bar_content.add_class("paused")
-                
-                # Update the content to show "Paused" status
-                current_text = self.progress_bar_content.renderable
-                if isinstance(current_text, str) and "(Playing)" in current_text:
-                    new_text = current_text.replace("(Playing)", "(Paused)")
-                    self.progress_bar_content.update(new_text)
-                elif isinstance(current_text, str) and not "(Paused)" in current_text:
-                    # If there's no status indicator yet
-                    self.progress_bar_content.update(f"{current_text} (Paused)")
     
     def action_stop_playback(self):
         """Stop the current playback."""
@@ -708,13 +689,6 @@ class Results(App):
         self.currently_playing = None
         self.is_paused = False
         self.now_playing.update("Not Playing")
-        
-        # Reset progress display styling
-        self.progress_bar_content.remove_class("playing")
-        self.progress_bar_content.remove_class("paused")
-        
-        # Reset progress display text
-        self.progress_bar_content.update("0:00 / 0:00 (Not Playing)")
         
         # Hide lyrics display if showing
         if self.lyrics_display and self.lyrics_display.styles.display != "none":
@@ -728,7 +702,7 @@ class Results(App):
         """Update a simple textual progress bar."""
         bar_width = 40  # width of the progress bar
         if duration <= 0:
-            progress_text = "0:00 / 0:00"
+            progress_text = ""
             bar = "▕" + "░" * bar_width + "▏"
         else:
             percent = min(position / duration, 1.0)
@@ -744,8 +718,6 @@ class Results(App):
 
     def _update_progress_ui(self, position, duration):
         """Updates the timestamp display on the main thread."""
-        if not self.progress_bar_content or duration <= 0:
-            return
         
         # Calculate the current and total time in minutes and seconds
         minutes_pos = int(position // 60)
@@ -764,18 +736,12 @@ class Results(App):
         # Create a clear timestamp with percentage
         time_text = f"{minutes_pos}:{seconds_pos:02d} / {minutes_dur}:{seconds_dur:02d} ({percent:.1f}%) {status}"
         
-        # Update the component
-        self.progress_bar_content.update(time_text)
-        
         # Update lyrics position if visible
         if hasattr(self, 'lyrics_display') and self.lyrics_display and self.lyrics_display.styles.display != "none":
             self.lyrics_display.update_position(position)
 
     def _update_progress_ui(self, position, duration):
         """Updates the UI components on the main thread."""
-        if not self.progress_bar_content or duration <= 0:
-            return
-        
         bar_width = 80
         percent = min(position / duration, 1.0)
         filled = int(bar_width * percent)
@@ -809,8 +775,6 @@ class Results(App):
 
     def _handle_track_end(self):
         """Handle track end in the main thread."""
-        # Reset the timestamp display with clear end state
-        self.progress_bar_content.update("0:00 / 0:00 (Finished)")
         
         # Use existing logic for repeat functionality
         if self.repeat and self.currently_playing:
@@ -894,7 +858,6 @@ class Results(App):
             self.currently_playing = None
             self.is_paused = False
             self.now_playing.update("Not Playing")
-            self.progress_bar_content.update("")
             self.notify("Playback stopped", title="Playback")
 
     def action_fast_forward(self):
@@ -956,7 +919,22 @@ class Results(App):
     def on_track_end(self):
         if self.repeat and self.currently_playing:
             self.call_from_thread(lambda: self.play_track(self.currently_playing))
-    
+
+    async def action_toggle_keybinds(self):
+        """Toggle visibility of the keybinds help screen."""
+        if not hasattr(self, "keybinds_display") or self.keybinds_display is None:
+            self.keybinds_display = self.query_one("#keybinds_display", Static)
+            if not self.keybinds_display:
+                self.notify("Keybinds display not available", title="Error")
+                return
+
+        if self.keybinds_display.styles.display == "none":
+            self.keybinds_display.styles.display = "block"
+            self.notify("Showing keybindings", title="Help")
+        else:
+            self.keybinds_display.styles.display = "none"
+            self.notify("Hiding keybindings", title="Help")
+
     def format_track_info(self, track):
         track_id = track.get("id")
         if track_id:
