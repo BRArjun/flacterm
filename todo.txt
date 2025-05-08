@@ -2,7 +2,7 @@
 
 - implement like support / adding to liked music 
 - creating custom user playlists
-- implement queue function
+- implement moving inside queue
 - fix vlc errors being shown directly when trying to abruptly stop songs 
 
 -- Low Priority

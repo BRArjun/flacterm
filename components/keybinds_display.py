@@ -27,14 +27,15 @@ class KeybindsDisplay(Static):
             "Esc   Stop playback\n"
             "h     Fast forward 5 seconds\n"
             "g     Rewind 5 seconds\n"
-            "^s    Submit new search\n"
+            "Enter Submit new search\n"
             "r     Toggle repeat mode\n"
             "a     Add current track to queue\n"
-            "d     Remove track from queue\n"
-            "Q     Show/hide queue display\n"
-            "N     Play next track in queue\n"
+            "y     Remove track from queue\n"
+            "t     Show/hide queue display\n"
+            "z     Play next track in queue\n"
             "P     Play previous track in queue\n"
-            "C     Clear queue\n"
+            "c     Clear queue\n"
+            "Tab   Switch panel focus"
         )
 
     def render(self):

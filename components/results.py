@@ -27,6 +27,9 @@ from utils.api import (
 
 from components.queue_manager import QueueManager
 from components.queue_display import QueueDisplay
+from components.playlist_manager import PlaylistManager
+from components.playlist_display import PlaylistDisplay
+from components.playlist_selector import PlaylistSelector, PlaylistSelected
 
 
 # Constants
@@ -145,7 +148,10 @@ class Results(App):
         ("y", "remove_from_queue", "Remove from Queue"),
         ("z", "next_track", "Next Track"),
         ("x", "previous_track", "Previous Track"),
-        ("c", "clear_queue", "Clear Queue")
+        ("c", "clear_queue", "Clear Queue"),
+        ("tab", "focus_next", "Switch panel focus"),
+        ("m", "toggle_playlists", "Toggle playlists"),
+        ("w", "add_to_playlist", "Add to playlist"),
     ]
 
     def __init__(self, results=None, search_type="track", query=""):
@@ -169,6 +175,8 @@ class Results(App):
         self.queue_manager = QueueManager()
         # Track visibility of queue
         self.show_queue = False
+        self.playlist_manager = PlaylistManager()
+        self.show_playlists = False
         
     def compose(self) -> ComposeResult:
         yield Header(f"DAB Terminal - Search: '{self.query}'")
@@ -193,6 +201,8 @@ class Results(App):
             self.table = DataTable(id="results_table")
             yield self.table
 
+            yield DataTable(id="queue_table")
+
             self.pagination = Static(id="pagination")
             yield self.pagination
 
@@ -200,6 +210,8 @@ class Results(App):
             yield self.info
 
             yield QueueDisplay(self.queue_manager, id="queue-display", classes="hidden")
+
+            yield PlaylistDisplay(self.playlist_manager, self.queue_manager, id="playlist-display", classes="hidden")
 
         # Docked progress bar at the bottom
         with Container(id="progress_container"):
@@ -225,6 +237,8 @@ class Results(App):
         self.set_interval(0.5, self.check_progress_updates)
 
         self.query_one("#queue-display").display = False
+
+        self.query_one("#playlist-display").display = False
         
     def check_progress_updates(self):
         """Regular timer callback to ensure progress bar updates."""
@@ -382,6 +396,22 @@ class Results(App):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.update_page()
+
+    def action_focus_next(self) -> None:
+        """Toggle focus between results and queue tables."""
+        results_table = self.query_one("#results_table", DataTable)
+        queue_table = self.query_one("#queue_table", DataTable)
+
+        if self.focused == results_table:
+            self.set_focus(queue_table)
+        else:
+            self.set_focus(results_table)
+
+    def action_focus_queue(self):
+        self.set_focus(self.query_one("#queue"))
+
+    def action_focus_results(self):
+        self.set_focus(self.query_one("#results"))
 
     def action_next_track(self):
         """Play the next track in the queue."""
@@ -577,6 +607,67 @@ class Results(App):
         else:
             self.keybinds_display.styles.display = "none"
             self.notify("Hiding keybindings", title="Help")
+
+    def action_toggle_playlists(self):
+        """Toggle the playlist display visibility."""
+        playlist_display = self.query_one("#playlist-display")
+        self.show_playlists = not self.show_playlists
+        
+        if self.show_playlists:
+            playlist_display.remove_class("hidden")
+            playlist_display.display = True
+        else:
+            playlist_display.add_class("hidden")
+            playlist_display.display = False
+    
+    def action_add_to_playlist(self):
+        """Add the currently selected track to a playlist."""
+        selected_track = self.get_selected_track()
+        if not selected_track:
+            self.notify("No track selected")
+            return
+
+        track_to_add = self.currently_playing or selected_track
+        playlists = self.playlist_manager.get_playlists()
+
+        playlist_display = self.query_one("#playlist-display")
+
+        if not playlists:
+            self.notify("No playlists available. Create one first.")
+            self.show_playlists = True
+            playlist_display.remove_class("hidden")
+            
+            # Show the new playlist creation form automatically
+            playlist_display.query_one("#new-playlist-area").remove_class("hidden")
+            playlist_display.query_one("#new-playlist-input").focus()
+
+            return
+
+        # Use the first playlist for simplicity
+        playlist_name = playlists[0]
+        if playlist_display.add_current_track_to_playlist(track_to_add, playlist_name):
+            self.notify(f"Added '{track_to_add.get('title', 'Unknown')}' to playlist '{playlist_name}'")
+        else:
+            self.notify("Failed to add track to playlist")
+
+    def on_playlist_selected(self, event: PlaylistSelected):
+        selected_track = self.get_selected_track()
+        if not selected_track:
+            self.notify("No track selected")
+            return
+
+        track_to_add = self.currently_playing or selected_track
+        playlist_name = event.playlist
+
+        playlist_display = self.query_one("#playlist-display")
+        if playlist_display.add_current_track_to_playlist(track_to_add, playlist_name):
+            self.notify(f"Added '{track_to_add.get('title', 'Unknown')}' to playlist '{playlist_name}'")
+        else:
+            self.notify("Failed to add track to playlist")
+
+        # Optionally hide the selector again
+        self.show_playlists = False
+        playlist_display.add_class("hidden")
 
     async def action_download_hovered_track(self):
         """Download the hovered track from results table."""
