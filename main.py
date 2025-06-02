@@ -136,7 +136,7 @@ class SearchScreen(Screen):
 ░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓███████▓▒░  
 ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
 ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░     
+   ░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░     
 """, classes="ascii-art")
 
                 with Container(classes="features"):
@@ -167,9 +167,10 @@ class SearchScreen(Screen):
                 self.status_label = Static("", id="status")
                 yield self.status_label
 
-    def on_mount(self) -> None:
+    def on_mount(self):
         """Focus the search input when screen loads."""
         self.search_input.focus()
+        self.theme = 'gruvbox'
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press events."""
@@ -268,6 +269,7 @@ class DABMusicPlayerApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(SearchScreen())
+        self.theme = 'gruvbox'
 
     def check_for_results_transition(self):
         if self.show_results_flag and self.search_results:

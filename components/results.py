@@ -29,7 +29,7 @@ from components.queue_manager import QueueManager
 from components.queue_display import QueueDisplay
 from components.playlist_manager import PlaylistManager
 from components.playlist_display import PlaylistDisplay
-from components.playlist_selector import PlaylistSelector, PlaylistSelected
+from components.playlist_selector import PlaylistSelectorModal, PlaylistSelectionResult
 
 
 # Constants
@@ -132,26 +132,26 @@ class Results(App):
         ("q", "quit", "Quit"),
         ("s", "show_info", "Show Info"),
         ("/", "search", "New Search"),
-        ("n", "next_page", "Next Page"),
-        ("p", "prev_page", "Prev Page"),
+        ("right", "next_page", "Next Page"),
+        ("left", "prev_page", "Prev Page"),
         ("space", "toggle_play", "Play/Pause"),
         ("escape", "stop_playback", "Stop"),
-        ("h", "fast_forward", "Forward"),
-        ("g", "rewind", "Rewind"),
-        ("ctrl+s", "submit_search", "Submit Search"),
+        ("b", "fast_forward", "Forward"),
+        ("v", "rewind", "Rewind"),
+        ("enter", "submit_search", "Submit Search"),
         ("l", "toggle_lyrics", "Show/Hide Lyrics"),
         ("r", "toggle_repeat", "Repeat Mode"),
-        ("v", "toggle_keybinds", "Toggle keybindings help"),
+        ("h", "toggle_keybinds", "Toggle keybindings help"),
         ("d", "download_hovered_track", "Download Track"),
         ("a", "add_to_queue", "Add to queue"),
         ("t", "toggle_queue", "Toggle queue"),
         ("y", "remove_from_queue", "Remove from Queue"),
-        ("z", "next_track", "Next Track"),
-        ("x", "previous_track", "Previous Track"),
         ("c", "clear_queue", "Clear Queue"),
-        ("tab", "focus_next", "Switch panel focus"),
         ("m", "toggle_playlists", "Toggle playlists"),
-        ("w", "add_to_playlist", "Add to playlist"),
+        ("k", "show_queue_as_results", "Show Queue as Results"),
+        ("e", "show_normal_results", "Show Normal Results"),
+        ("ctrl+a", "quick_add_to_playlist", "Quick Add to Playlist"),
+        ("ctrl+r", "quick_remove_from_playlist", "Remove from Playlist"),
     ]
 
     def __init__(self, results=None, search_type="track", query=""):
@@ -177,6 +177,10 @@ class Results(App):
         self.show_queue = False
         self.playlist_manager = PlaylistManager()
         self.show_playlists = False
+        self.viewing_queue = False  # Track if we're viewing queue as results
+        self.original_results = None  # Store original results when viewing queue
+        self.playlist_manager = PlaylistManager()
+        self.show_playlist_panel = False
         
     def compose(self) -> ComposeResult:
         yield Header(f"DAB Terminal - Search: '{self.query}'")
@@ -211,7 +215,9 @@ class Results(App):
 
             yield QueueDisplay(self.queue_manager, id="queue-display", classes="hidden")
 
-            yield PlaylistDisplay(self.playlist_manager, self.queue_manager, id="playlist-display", classes="hidden")
+            self.playlist_display = PlaylistDisplay(self.playlist_manager, id="playlist-display")
+            self.playlist_display.styles.display = "none"
+            yield self.playlist_display
 
         # Docked progress bar at the bottom
         with Container(id="progress_container"):
@@ -225,6 +231,7 @@ class Results(App):
         self.table.focus()
         self.update_page()
 
+        self.theme = 'gruvbox'
         self.keybinds_display = self.query_one("#keybinds_display")
         self.keybinds_display.styles.display = "none"
 
@@ -349,7 +356,11 @@ class Results(App):
             self.is_paused = False
             self.now_playing.update("Not Playing")
             self.notify("Playback stopped", title="Playback")
-
+    
+    def _handle_playlist_play_callback(self, playlist_name: str, tracks: list):
+        """Handle playlist play callback from playlist manager."""
+        self._start_playlist_playback(playlist_name)
+    
     def _handle_track_end(self):
         """Handle track end in the main thread."""
         
@@ -383,7 +394,10 @@ class Results(App):
                 duration_str
             )
             
-        pagination_text = f"Page {self.current_page + 1}/{self.total_pages} | Items {start_idx + 1}-{end_idx} of {len(self.results)}"
+        # Replace the pagination_text line in update_page() method
+        view_type = "Queue" if self.viewing_queue else "Results"
+        pagination_text = f"{view_type} - Page {self.current_page + 1}/{self.total_pages} | Items {start_idx + 1}-{end_idx} of {len(self.results)}"
+
         self.pagination.update(pagination_text)
         
         # Reset info panel
@@ -439,6 +453,122 @@ class Results(App):
         if self.current_page > 0:
             self.current_page -= 1
             self.update_page()
+    
+    def action_show_queue_as_results(self):
+        """Stop current playback and show queue tracks as results."""
+        # Stop current playback
+        if self.currently_playing:
+            self.stop_playback()
+        
+        # Get queue tracks
+        queue_tracks = self.queue_manager.get_all_tracks()
+        
+        if not queue_tracks:
+            self.notify("Queue is empty", title="Queue View")
+            return
+        
+        # Store original results if not already viewing queue
+        if not self.viewing_queue:
+            self.original_results = self.results.copy()
+        
+        # Set queue tracks as current results
+        self.results = queue_tracks
+        self.viewing_queue = True
+        self.current_page = 0
+        self.total_pages = ceil(len(self.results) / ITEMS_PER_PAGE)
+        
+        # Update the display
+        self.update_page()
+        
+        # Update header to show we're viewing queue
+        header = self.query_one(Header)
+        header.text = "DAB Terminal - Queue View"
+        
+        self.notify(f"Showing {len(queue_tracks)} tracks from queue", title="Queue View")
+
+    def action_show_normal_results(self):
+        """Return to normal results view from queue view."""
+        if not self.viewing_queue:
+            self.notify("Already viewing normal results", title="Results View")
+            return
+        
+        # Restore original results
+        if self.original_results is not None:
+            self.results = self.original_results
+            self.original_results = None
+        else:
+            # Fallback to empty results if somehow original_results is None
+            self.results = []
+        
+        self.viewing_queue = False
+        self.current_page = 0
+        self.total_pages = ceil(len(self.results) / ITEMS_PER_PAGE) if self.results else 0
+        
+        # Update the display
+        self.update_page()
+        
+        # Update header to show normal search results
+        header = self.query_one(Header)
+        header.text = f"DAB Terminal - Search: '{self.query}'"
+        
+        self.notify("Returned to normal results view", title="Results View")
+
+    def action_toggle_playlist_panel(self):
+        """Toggle the playlist management panel."""
+        self.show_playlist_panel = not self.show_playlist_panel
+        
+        if self.show_playlist_panel:
+            self.playlist_display.styles.display = "block"
+            self.notify("Showing playlist panel", title="Playlists")
+        else:
+            self.playlist_display.styles.display = "none"
+            self.notify("Hiding playlist panel", title="Playlists")
+
+    def action_quick_add_to_playlist(self):
+        """Quick add selected track to a playlist via modal selector."""
+        selected_track = self.get_selected_track()
+        if not selected_track:
+            self.notify("No track selected", title="Add to Playlist")
+            return
+        
+        # Show playlist selector modal
+        track_title = f"{selected_track.get('title', 'Unknown')} - {selected_track.get('artist', 'Unknown')}"
+        modal = PlaylistSelectorModal(self.playlist_manager, track_title, "add")
+        self.push_screen(modal)
+
+    def action_quick_remove_from_playlist(self):
+        """Quick remove selected track from a playlist via modal selector."""
+        selected_track = self.get_selected_track()
+        if not selected_track:
+            self.notify("No track selected", title="Remove from Playlist")
+            return
+        
+        track_title = f"{selected_track.get('title', 'Unknown')} - {selected_track.get('artist', 'Unknown')}"
+        modal = PlaylistSelectorModal(self.playlist_manager, track_title, "remove")
+        self.push_screen(modal)
+
+    def on_playlist_selection_result(self, event: PlaylistSelectionResult):
+        """Handle playlist selection result from modal."""
+        selected_track = self.get_selected_track()
+        if not selected_track:
+            return
+        
+        if event.action == "add":
+            if self.playlist_manager.add_track_to_playlist(event.playlist_name, selected_track):
+                self.notify(f"Added to '{event.playlist_name}'", title="Success")
+            else:
+                self.notify(f"Failed to add to '{event.playlist_name}' (may already exist)", title="Error")
+        
+        elif event.action == "remove":
+            track_id = selected_track.get("id")
+            if track_id and self.playlist_manager.remove_track_by_id(event.playlist_name, track_id):
+                self.notify(f"Removed from '{event.playlist_name}'", title="Success")
+            else:
+                self.notify(f"Track not found in '{event.playlist_name}'", title="Error")
+    
+        # Refresh playlist display if it's visible
+        if self.show_playlist_panel:
+            self.playlist_display.refresh_playlist_list()
 
     def action_play_selected(self):
         """Play the currently selected track."""
@@ -607,7 +737,7 @@ class Results(App):
         else:
             self.keybinds_display.styles.display = "none"
             self.notify("Hiding keybindings", title="Help")
-
+    
     def action_toggle_playlists(self):
         """Toggle the playlist display visibility."""
         playlist_display = self.query_one("#playlist-display")
@@ -619,7 +749,70 @@ class Results(App):
         else:
             playlist_display.add_class("hidden")
             playlist_display.display = False
+    # Add this method to your Results class in results.py
+
+    def action_play_playlist(self):
+        """Show playlists and allow user to select one to play."""
+        playlists = self.playlist_manager.get_playlists()
+        
+        if not playlists:
+            self.notify("No playlists found. Create a playlist first.", title="Play Playlist")
+            # Optionally show the playlist panel to create one
+            self.show_playlists = True
+            playlist_display = self.query_one("#playlist-display")
+            playlist_display.remove_class("hidden")
+            playlist_display.display = True
+            return
+        
+        # If there's only one playlist, play it directly
+        if len(playlists) == 1:
+            self._start_playlist_playback(playlists[0])
+            return
+        
+        # Show playlist selection (you might want to implement a proper selection UI)
+        # For now, let's show the playlist panel and notify the user
+        self.show_playlists = True
+        playlist_display = self.query_one("#playlist-display")
+        playlist_display.remove_class("hidden")
+        playlist_display.display = True
+        
+        # Create a formatted list of playlists for notification
+        playlist_list = "\n".join([f"{i+1}. {name} ({len(self.playlist_manager.get_playlist(name))} tracks)" 
+                                for i, name in enumerate(playlists)])
+        
+        self.notify(f"Available playlists:\n{playlist_list}\n\nSelect from playlist panel or use first playlist", 
+                    title="Play Playlist", timeout=5)
+        
+        # For immediate functionality, play the first playlist
+        # You can enhance this later with a proper selection interface
+        self._start_playlist_playback(playlists[0])
     
+    def _start_playlist_playback(self, playlist_name: str):
+        """Start playing tracks from the specified playlist."""
+        playlist_tracks = self.playlist_manager.get_playlist(playlist_name)
+        
+        if not playlist_tracks:
+            self.notify(f"Playlist '{playlist_name}' is empty", title="Play Playlist")
+            return
+        
+        # Stop current playback
+        self.stop_playback()
+        
+        # Clear current queue and add all playlist tracks
+        self.queue_manager.clear_queue()
+        
+        for track in playlist_tracks:
+            self.queue_manager.add_track(track)
+        
+        # Start playing the first track
+        first_track = self.queue_manager.next_track()
+        if first_track:
+            self.play_track(first_track)
+            self.notify(f"Playing playlist: {playlist_name} ({len(playlist_tracks)} tracks)", 
+                    title="Playlist Started")
+        else:
+            self.notify("Failed to start playlist playback", title="Error")
+
     def action_add_to_playlist(self):
         """Add the currently selected track to a playlist."""
         selected_track = self.get_selected_track()
@@ -650,7 +843,7 @@ class Results(App):
         else:
             self.notify("Failed to add track to playlist")
 
-    def on_playlist_selected(self, event: PlaylistSelected):
+    def on_playlist_selected(self, event: PlaylistSelectorModal):
         selected_track = self.get_selected_track()
         if not selected_track:
             self.notify("No track selected")
