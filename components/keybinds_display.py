@@ -35,6 +35,8 @@ class KeybindsDisplay(Static):
             "c     Clear queue\n"
             "m     Show playlists\n"
             "d     Download hovered track\n"
+            "k	   Play from queue\n"
+            "e     Return to normal results\n"
             "^a    Add hovered song to playlist\n"
             "^r    Remove hovered song from playlist\n"
         )

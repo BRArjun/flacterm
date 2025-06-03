@@ -230,7 +230,7 @@ class Results(App):
         self.table.show_cursor = True
         self.table.focus()
         self.update_page()
-
+        
         self.theme = 'gruvbox'
         self.keybinds_display = self.query_one("#keybinds_display")
         self.keybinds_display.styles.display = "none"

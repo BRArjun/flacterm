@@ -280,7 +280,6 @@ class DABMusicPlayerApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(SearchScreen())
-        self.theme = 'gruvbox'
         self.styles.background = Color(0,0,0, 0.1)
 
     def check_for_results_transition(self):
