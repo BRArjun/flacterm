@@ -1,5 +1,6 @@
 __pycache__
 components/__pycache__
 utils/__pycache__
-dab.py
 YourDownloads/
+playlists.json
+playlists/

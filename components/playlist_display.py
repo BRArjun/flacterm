@@ -33,7 +33,7 @@ class PlaylistDisplay(Widget):
                 # Create new playlist section
                 with Horizontal(id="create-playlist-section"):
                     self.new_playlist_input = Input(
-                        placeholder="Enter playlist name...",
+                        placeholder="Create a new playlist ...",
                         id="new-playlist-input"
                     )
                     yield self.new_playlist_input

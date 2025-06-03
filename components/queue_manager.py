@@ -166,3 +166,12 @@ class QueueManager:
                 self._on_queue_change_callback(self)
             except Exception as e:
                 console.print(f"Error in queue change callback: {e}")
+
+    def get_all_tracks(self) -> List[Dict]:
+        """
+        Get all tracks in the queue.
+        
+        Returns:
+            List of all tracks in the queue
+        """
+        return self._queue.copy()  # Return a copy to prevent external modification

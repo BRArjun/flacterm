@@ -10,6 +10,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Input, Button, Static, Select, Label
 from textual.binding import Binding
+from textual.color import Color
 from textual.screen import Screen
 
 # Import components
@@ -28,93 +29,105 @@ class SearchScreen(Screen):
     ]
 
     CSS = """
-    Screen {
-        background: transparent;
-    }
-
-    .main-container {
-        layout: horizontal;
-        width: 100%;
-        height: 100%;
-    }
-
-    .left-panel {
-        width: 50%;
-        height: 100%;
-        padding: 4;
-        align: center middle;
-    }
-
-    .ascii-art {
-        color: $accent;
-        text-style: bold;
-        margin-bottom: 2;
-        text-align: center;
-    }
-
-    .features {
-        width: 100%;
-        padding: 1;
-        color: $text;
-    }
-
-    .features-title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    .right-panel {
-    width: 50%;
-    height: 100%;
-    padding: 4;
-    align: center middle;
-    layout: vertical;
-    content-align: center middle;
+Screen {
+    background: transparent;
 }
 
-.right-panel > * {
+.main-container {
+    border: solid white;
+    width: 100%;
+    height: 100%;
+    padding: 1;
+}
+
+.left-panel {
+    width: 50%;
+    height: 100%;
+    dock: left;
+    padding: 2;
+}
+
+.ascii-container {
+    width: 100%;
+    height: auto;
+    content-align: center middle;
+    text-align: center;
+    margin-bottom: 2;
+}
+
+.ascii-art {
+    text-align: center;
+    color: yellow;
+    text-style: bold;
+}
+
+.features-box {
+    border: solid cyan;
+    width: 90%;
+    height: auto;
+    margin: 0;
+    padding: 2;
+}
+
+.features {
+    width: 100%;
+}
+
+.features-title {
+    text-style: bold;
+    color: cyan;
     margin-bottom: 1;
 }
 
-    .form-label {
-        color: $text;
-        text-style: bold;
-    }
-
-    #search-input,
-    #search-type {
-        width: 100%;
-        min-width: 40;
-    }
-
-    .button-group {
-    layout: horizontal;
-    content-align: center middle;
-    margin-top: 1;
+.right-panel {
+    width: 50%;
+    height: 100%;
+    dock: right;
+    padding: 2;
 }
 
-.button-group > * {
+.search-container {
+    width: 80%;
+    height: auto;
+    content-align: center middle;
+    margin: 0;
+    padding: 2;
+}
+
+.form-label {
+    margin-bottom: 1;
+    text-style: bold;
+    color: white;
+}
+
+#search-input {
+    width: 100%;
+    margin-bottom: 2;
+}
+
+.button-group {
+    margin-top: 1;
+    width: 100%;
+    height: auto;
+}
+
+.search-button {
     margin-right: 2;
 }
 
-    .search-button {
-        min-width: 18;
-    }
+#status {
+    margin-top: 2;
+    text-align: center;
+}
 
-    #status {
-        margin-top: 1;
-        text-align: center;
-    }
+.error-message {
+    color: $error;
+}
 
-    .error-message {
-        color: $error;
-    }
-
-    .success-message {
-        color: $success;
-    }
-    """
-
+.success-message {
+    color: $success;
+}
+"""
     def __init__(self):
         super().__init__()
         self.search_input = None
@@ -126,51 +139,49 @@ class SearchScreen(Screen):
     def compose(self) -> ComposeResult:
         """Compose the search screen layout."""
         with Container(classes="main-container"):
-
-            # Left side: ASCII + features
-            with Container(classes="left-panel"):
-                yield Static(r"""
-░▒▓███████▓▒░ ░▒▓██████▓▒░░▒▓███████▓▒░  
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓███████▓▒░  
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-   ░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░     
-""", classes="ascii-art")
-
-                with Container(classes="features"):
-                    yield Static("Features:", classes="features-title")
-                    yield Static("• Search and play high-quality audio tracks")
-                    yield Static("• Synchronized lyrics display")
-                    yield Static("• Keyboard shortcuts for easy navigation")
-                    yield Static("• Track information and playback controls")
-
-            # Right side: Search Form
-            with Container(classes="right-panel"):
-                yield Label("Search Query:", classes="form-label")
-                self.search_input = Input(placeholder="Enter your search query...", id="search-input")
-                yield self.search_input
-
-                yield Label("Search Type:", classes="form-label")
-                self.search_type_select = Select([
-                    ("Track", "track"),
-                    ("Album", "album")
-                ], value="track", id="search-type")
-                yield self.search_type_select
-
-                with Horizontal(classes="button-group"):
-                    self.search_button = Button("Search", variant="primary", classes="search-button", id="search-btn")
-                    yield self.search_button
-                    yield Button("Quit", variant="error", classes="search-button", id="quit-btn")
-
-                self.status_label = Static("", id="status")
-                yield self.status_label
+            # Main content area
+            with Horizontal(classes="content-horizontal"):
+                # Left side: ASCII + features
+                with Vertical(classes="left-panel"):
+                    # ASCII art container
+                    with Container(classes="ascii-container"):
+                        yield Static(r"""
+███████╗██╗      █████╗  ██████╗████████╗███████╗██████╗ ███╗   ███╗
+██╔════╝██║     ██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗████╗ ████║
+█████╗  ██║     ███████║██║        ██║   █████╗  ██████╔╝██╔████╔██║
+██╔══╝  ██║     ██╔══██║██║        ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║
+██║     ███████╗██║  ██║╚██████╗   ██║   ███████╗██║  ██║██║ ╚═╝ ██║
+╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
+    """, classes="ascii-art")
+                    
+                    # Features box with border
+                    with Container(classes="features-box"):
+                        yield Static("Features:", classes="features-title")
+                        yield Static("• Search and play high-quality audio tracks")
+                        yield Static("• Synchronized lyrics display")
+                        yield Static("• Keyboard shortcuts for easy navigation")
+                        yield Static("• Track information and playback controls")
+                
+                # Right side: Search Form
+                with Vertical(classes="right-panel"):
+                    with Container(classes="search-container"):
+                        yield Label("Search Query:", classes="form-label")
+                        self.search_input = Input(placeholder="Enter your search query...", id="search-input")
+                        yield self.search_input
+                        with Horizontal(classes="button-group"):
+                            self.search_button = Button("Search", variant="primary", classes="search-button", id="search-btn")
+                            yield self.search_button
+                            yield Button("Quit", variant="error", classes="search-button", id="quit-btn")
+                        self.status_label = Static("", id="status")
+                        yield self.status_label
+                        self.search_type_select = 'track'
+                        
 
     def on_mount(self):
         """Focus the search input when screen loads."""
         self.search_input.focus()
         self.theme = 'gruvbox'
+        self.styles.background = Color(0,0,0, 0.1)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press events."""
@@ -195,7 +206,7 @@ class SearchScreen(Screen):
             self.status_label.add_class("error-message")
             return
 
-        search_type = self.search_type_select.value
+        search_type = self.search_type_select
 
         # Show album warning if selected
         if search_type == "album":
@@ -270,6 +281,7 @@ class DABMusicPlayerApp(App):
     def on_mount(self) -> None:
         self.push_screen(SearchScreen())
         self.theme = 'gruvbox'
+        self.styles.background = Color(0,0,0, 0.1)
 
     def check_for_results_transition(self):
         if self.show_results_flag and self.search_results:

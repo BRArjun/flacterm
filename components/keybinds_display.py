@@ -19,8 +19,8 @@ class KeybindsDisplay(Static):
             "h     Show/hide this help screen\n"
             "l     Toggle lyrics\n"
             "space Play/pause\n"
-            "->     Next page\n"
-            "<-     Previous page\n"
+            "->    Next page\n"
+            "<-    Previous page\n"
             "q     Quit\n"
             "s     Show track info\n"
             "/     Start a new search\n"
@@ -33,6 +33,10 @@ class KeybindsDisplay(Static):
             "y     Remove track from queue\n"
             "t     Show/hide queue display\n"
             "c     Clear queue\n"
+            "m     Show playlists\n"
+            "d     Download hovered track\n"
+            "^a    Add hovered song to playlist\n"
+            "^r    Remove hovered song from playlist\n"
         )
 
     def render(self):

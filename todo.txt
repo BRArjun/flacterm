@@ -1,17 +1,11 @@
 -- High Priority 
 
-- implement like support / adding to liked music 
-- creating custom user playlists
-- implement moving inside queue
 - fix vlc errors being shown directly when trying to abruptly stop songs 
 
 -- Low Priority
 
 - write a good readme
-- implement album support from the api
-- improve UI
 - make api requests faster or if there are too many results batch call the api
-- caching
 
 -- Future Plans
 
