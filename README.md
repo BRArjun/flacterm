@@ -88,7 +88,7 @@ python3 main.py
 I was on the search for a terminal FLAC streaming tool, but could not find any that could support streaming FLACs natively [either that, or I just suck at searching, :( ]\
 I knew downloading FLAC files and then playing them was an option as well, but I wanted to focus on streaming these files just like Spotify and Youtube Music. \
 Other existing tools support high res formats too but FLAC files provide the best audio experience out of all existing formats.\
-I felt that such an application may be useful to me at the very least, even if it is not for others, and so I built flacterm :) .
+I felt that such an application may be useful to me at the very least, even if it is not for others, and so I built flacterm :).
 
 Major thanks to these other open source projects for being my inspiration: 
 - [kew](https://github.com/ravachol/kew/)
