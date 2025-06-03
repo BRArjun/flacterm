@@ -7,8 +7,6 @@
 ╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
 ```
 
-[![GitHub license](https://img.shields.io/github/license/ravachol/kew?color=333333&style=for-the-badge)](https://github.com/ravachol/kew/blob/master/LICENSE)
-
 Stream [FLAC](https://en.wikipedia.org/wiki/FLAC) music, from the comfort of your Linux terminal.
 
 ## Features
