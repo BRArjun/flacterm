@@ -4,7 +4,7 @@ from rich.text import Text
 from textual.widgets import Static
 from textual.reactive import reactive
 from textual.binding import Binding
-from components.queue_manager import QueueManager
+from .queue_manager import QueueManager
 
 
 class QueueDisplay(Static, can_focus=True):

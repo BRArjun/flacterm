@@ -1,0 +1,33 @@
+# Include documentation files
+include README.md
+include LICENSE
+include requirements.txt
+include todo.txt
+
+# Include configuration files
+include pyproject.toml
+include setup.cfg
+
+# Include all Python files
+recursive-include components *.py
+recursive-include utils *.py
+include main.py
+include config.py
+
+# Include package metadata
+include *.py
+include *.txt
+include *.md
+
+# Exclude unnecessary files
+exclude .gitignore
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.pyo
+recursive-exclude * *.pyd
+recursive-exclude * .git*
+recursive-exclude * .pytest_cache
+recursive-exclude * .DS_Store
+recursive-exclude YourDownloads *
+recursive-exclude playlists *
+exclude playlists.json

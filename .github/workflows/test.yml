@@ -1,0 +1,129 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y vlc vlc-bin
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Test imports
+      run: |
+        python -c "import sys; print(f'Python version: {sys.version}')"
+        python -c "import main; print('main module import successful')"
+        python -c "from components.audio_player import AudioPlayer; print('AudioPlayer import successful')"
+        python -c "from components.results import Results; print('Results import successful')"
+        python -c "from components.queue_manager import QueueManager; print('QueueManager import successful')"
+        python -c "from components.playlist_manager import PlaylistManager; print('PlaylistManager import successful')"
+        python -c "from utils.api import get_base_url; print('API utils import successful')"
+
+    - name: Test VLC availability
+      run: |
+        python -c "import vlc; print('VLC Python bindings work')"
+        vlc --version
+
+    - name: Test basic functionality
+      run: |
+        python -c "
+        from components.audio_player import AudioPlayer
+        from components.queue_manager import QueueManager
+        from components.playlist_manager import PlaylistManager
+
+        # Test AudioPlayer initialization
+        player = AudioPlayer()
+        print('AudioPlayer initialized successfully')
+
+        # Test QueueManager
+        queue = QueueManager()
+        print('QueueManager initialized successfully')
+
+        # Test PlaylistManager
+        playlist = PlaylistManager()
+        print('PlaylistManager initialized successfully')
+
+        # Test API functions
+        from utils.api import get_base_url
+        base_url = get_base_url()
+        print(f'Base URL retrieved: {base_url}')
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+
+    - name: Check code formatting with black
+      run: |
+        black --check --diff .
+
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only --diff .
+
+    - name: Lint with flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build wheel setuptools
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Test wheel installation
+      run: |
+        pip install dist/*.whl
+
+    - name: Test installed package
+      run: |
+        python -c "import main; print('Installed package works')"

@@ -14,9 +14,9 @@ from textual.color import Color
 from textual.screen import Screen
 
 # Import components
-from components.audio_player import AudioPlayer
-from components.results import Results
-from utils.api import fetch_all_results
+from .components.audio_player import AudioPlayer
+from .components.results import Results
+from .utils.api import fetch_all_results
 
 
 class SearchScreen(Screen):
@@ -153,7 +153,7 @@ Screen {
 ██║     ███████╗██║  ██║╚██████╗   ██║   ███████╗██║  ██║██║ ╚═╝ ██║
 ╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
     """, classes="ascii-art")
-                    
+
                     # Features box with border
                     with Container(classes="features-box"):
                         yield Static("Features:", classes="features-title")
@@ -161,7 +161,7 @@ Screen {
                         yield Static("• Synchronized lyrics display")
                         yield Static("• Keyboard shortcuts for easy navigation")
                         yield Static("• Track information and playback controls")
-                
+
                 # Right side: Search Form
                 with Vertical(classes="right-panel"):
                     with Container(classes="search-container"):
@@ -175,7 +175,7 @@ Screen {
                         self.status_label = Static("", id="status")
                         yield self.status_label
                         self.search_type_select = 'track'
-                        
+
 
     def on_mount(self):
         """Focus the search input when screen loads."""

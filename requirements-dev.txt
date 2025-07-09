@@ -1,0 +1,39 @@
+# Development requirements for flacterm
+# Install with: pip install -r requirements-dev.txt
+
+# Build and packaging
+build>=0.8.0
+wheel>=0.37.0
+setuptools>=45.0.0
+twine>=4.0.0
+setuptools_scm>=6.2.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.8.0
+pytest-asyncio>=0.20.0
+
+# Code quality
+black>=22.0.0
+flake8>=5.0.0
+isort>=5.10.0
+mypy>=0.991
+pre-commit>=2.20.0
+
+# Documentation
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.0.0
+myst-parser>=0.18.0
+
+# Development tools
+ipython>=8.0.0
+ipdb>=0.13.0
+tox>=4.0.0
+
+# Runtime requirements (duplicated from requirements.txt for completeness)
+textual
+rich
+requests
+python-vlc
+lrclibapi

@@ -1,3 +1,10 @@
+dist
+flacterm.egg-info
+test_env
+.ropeproject
+DEPLOYMENT.md
+DEPLOYMENT_INSTRUCTIONS.md
+PACKAGING_SUMMARY.md
 __pycache__
 components/__pycache__
 utils/__pycache__

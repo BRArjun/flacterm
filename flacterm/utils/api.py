@@ -6,7 +6,7 @@ import base64
 import os
 import threading
 from urllib.parse import urlencode, quote
-from config import _ENCODED_API, console
+from ..config import _ENCODED_API, console
 
 DOWNLOAD_DIR = "YourDownloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -32,12 +32,12 @@ def get_base_url():
 def search_dab(query: str, search_type: str = "track", offset: int = 0):
     """
     Search for tracks or albums using the DAB API.
-    
+
     Args:
         query: Search query string
         search_type: Type of search ("track" or "album")
         offset: Pagination offset
-        
+
     Returns:
         JSON response or None if request failed
     """
@@ -55,11 +55,11 @@ def search_dab(query: str, search_type: str = "track", offset: int = 0):
 def fetch_all_results(query, search_type):
     """
     Fetch all pages of search results.
-    
+
     Args:
         query: Search query string
         search_type: Type of search ("track" or "album")
-        
+
     Returns:
         List of all items from all pages
     """
@@ -85,10 +85,10 @@ def fetch_all_results(query, search_type):
 def get_streaming_url(track_id):
     """
     Get the streaming URL for a track.
-    
+
     Args:
         track_id: ID of the track
-        
+
     Returns:
         Streaming URL or None if request failed
     """
@@ -105,10 +105,10 @@ def get_streaming_url(track_id):
 def get_track_detail(track_id):
     """
     Get detailed information for a track.
-    
+
     Args:
         track_id: ID of the track
-        
+
     Returns:
         Track details as JSON or None if request failed
     """

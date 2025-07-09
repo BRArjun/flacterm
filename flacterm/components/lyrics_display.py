@@ -5,11 +5,11 @@ import re
 from textual.widget import Widget
 from textual.widgets import Static
 from textual.containers import ScrollableContainer
-from config import console
+from ..config import console
 
 class LyricsDisplay(Widget):
     """Widget for displaying synchronized lyrics."""
-    
+
     def compose(self):
         """Compose the widget."""
         self.scroll = ScrollableContainer(id="lyrics_display")
@@ -36,7 +36,7 @@ class LyricsDisplay(Widget):
     def parse_lyrics(self, raw_lyrics: str):
         """
         Parse LRC format lyrics.
-        
+
         Args:
             raw_lyrics: Raw LRC format lyrics text
         """
@@ -47,7 +47,7 @@ class LyricsDisplay(Widget):
                 min_str, sec_str, text = match.groups()
                 timestamp = int(min_str) * 60 + float(sec_str)
                 self.lyrics_lines.append((timestamp, text.strip()))
-        
+
         if not self.lyrics_lines:
             self.has_lyrics = False
         else:
@@ -72,13 +72,13 @@ class LyricsDisplay(Widget):
     def fetch_lyrics(self, artist, title, album=None, duration=None):
         """
         Fetch lyrics for a track.
-        
+
         Args:
             artist: Artist name
             title: Track title
             album: Album name (optional)
             duration: Track duration in seconds (optional)
-            
+
         Returns:
             True if lyrics were found, False otherwise
         """
@@ -133,19 +133,19 @@ class LyricsDisplay(Widget):
     async def highlight_line(self, index: int):
         """
         Highlight the current line and scroll to it.
-        
+
         Args:
             index: Index of the line to highlight
         """
         if not self.line_widgets or len(self.line_widgets) != len(self.lyrics_lines):
             console.print("Line widgets and lyrics lines don't match!")
             return
-        
+
         # Calculate visible range to optimize updates (show past and upcoming lines)
         visible_range = 5  # Number of lines to show before and after current
         start_idx = max(0, index - visible_range)
         end_idx = min(len(self.line_widgets) - 1, index + visible_range)
-            
+
         # Update only the visible lines to improve performance
         for i, widget in enumerate(self.line_widgets):
             if start_idx <= i <= end_idx:
@@ -169,10 +169,10 @@ class LyricsDisplay(Widget):
                     widget.update(self.lyrics_lines[i][1])
                     widget.styles.color = None
                     widget.styles.bold = False
-        
+
         # Make sure we refresh the display
         self.refresh()
-        
+
         # Center the current line in view (with some lines above for context)
         if 0 <= index < len(self.line_widgets):
             center_offset = 2  # Show 2 lines above the current line when possible
@@ -182,10 +182,10 @@ class LyricsDisplay(Widget):
     def search_lyrics(self, query):
         """
         Search for lyrics using a general query.
-        
+
         Args:
             query: Search query string
-            
+
         Returns:
             List of search results or None if no results
         """
@@ -194,28 +194,28 @@ class LyricsDisplay(Widget):
             self.scroll.mount(Static("lrclib library not available. Please install it."))
             self.scroll.refresh()
             return None
-            
+
         try:
             # Show status while searching
             self.scroll.remove_children()
             self.scroll.mount(Static(f"Searching for lyrics: '{query}'..."))
             self.scroll.refresh()
-            
+
             # Search for lyrics
             results = self.api.search_lyrics(track_name=query)
-            
+
             if results:
                 # Format results for display
                 self.scroll.remove_children()
                 self.scroll.mount(Static(f"Found {len(results)} results for '{query}':"))
-                
+
                 # Display up to 10 results
                 for i, result in enumerate(results[:10]):
                     info = f"{i+1}. {result.artist_name} - {result.track_name}"
                     if result.album_name:
                         info += f" ({result.album_name})"
                     self.scroll.mount(Static(info))
-                
+
                 self.scroll.refresh()
                 return results
             else:
@@ -223,38 +223,38 @@ class LyricsDisplay(Widget):
                 self.scroll.mount(Static(f"No results found for '{query}'"))
                 self.scroll.refresh()
                 return None
-                
+
         except Exception as e:
             console.print(f"Failed to search lyrics: {e}")
             self.scroll.remove_children()
             self.scroll.mount(Static(f"Error searching lyrics: {str(e)}"))
             self.scroll.refresh()
             return None
-            
+
     def get_lyrics_by_result(self, result_index, results):
         """
         Get lyrics from a specific search result.
-        
+
         Args:
             result_index: Index of the result to use
             results: List of search results
-            
+
         Returns:
             True if lyrics were found, False otherwise
         """
         if not results or result_index >= len(results):
             return False
-            
+
         try:
             # Show status while fetching
             self.scroll.remove_children()
             self.scroll.mount(Static("Fetching lyrics from selected result..."))
             self.scroll.refresh()
-            
+
             # Get lyrics by ID
             lyrics_result = self.api.get_lyrics_by_id(results[result_index].id)
             raw_lyrics = lyrics_result.synced_lyrics or lyrics_result.plain_lyrics
-            
+
             if raw_lyrics:
                 self.parse_lyrics(raw_lyrics)
                 self.update_content()
@@ -265,18 +265,18 @@ class LyricsDisplay(Widget):
                 self.scroll.mount(Static("No lyrics found in the selected result"))
                 self.scroll.refresh()
                 return False
-                
+
         except Exception as e:
             console.print(f"Failed to fetch lyrics from result: {e}")
             self.scroll.remove_children()
             self.scroll.mount(Static(f"Error fetching lyrics: {str(e)}"))
             self.scroll.refresh()
             return False
-    
+
     def update_position(self, position_seconds: float):
         """
         Highlight the current lyrics line based on the song's progress.
-        
+
         Args:
             position_seconds: Current playback position in seconds
         """

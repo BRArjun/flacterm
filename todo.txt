@@ -4,7 +4,6 @@
 
 -- Low Priority
 
-- write a good readme
 - make api requests faster or if there are too many results batch call the api
 
 -- Future Plans
